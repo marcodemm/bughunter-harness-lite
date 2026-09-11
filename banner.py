@@ -1,6 +1,15 @@
-"""Startup banner — ASCII art of BUGHUNTER / HARNESS / LITE / MANU + a
-beetle rendered in red, à la Hexstrike. Printed once at the top of
-`main()` before any orchestrator output.
+"""Startup banner — compact 3-row ASCII art of BUGHUNTER / HARNESS /
+LITE / MANU + a small beetle, rendered in red à la Hexstrike. Printed
+once at the top of `main()` before any REPL output.
+
+The block letters are the "mini" figlet font: 3 rows per word, ≤26 cols
+wide for the widest word (BUGHUNTER). Everything fits inside a portrait-
+mode mobile terminal (~40 cols) as well as a normal desktop terminal —
+no adaptive-width logic needed, one banner works everywhere. The old
+6-row block glyphs looked great on Mac but wrapped illegibly on a Kali
+NetHunter chroot on Android; this compact version was chosen after a
+real screenshot showed only LITE (the smallest 6-row word) rendered
+correctly on the phone.
 
 Colors are ANSI escapes; auto-disabled when stderr is not a TTY (piped
 runs, `--help`, `NO_COLOR` env, etc.) so log files stay clean.
@@ -12,62 +21,45 @@ import sys
 
 
 _RED = "\033[38;5;196m"       # bright red (xterm-256)
-_RED_BOLD = "\033[1;91m"      # bold bright red — used for the beetle
+_RED_BOLD = "\033[1;91m"      # bold bright red — reserved for the beetle
 _DIM = "\033[2m"
 _RESET = "\033[0m"
 
 
-# ─── ASCII text: BUGHUNTER (block, 6 rows) ─────────────────────────────
+# ─── ASCII text: BUGHUNTER (3 rows, ~26 cols — mini figlet) ────────────
 _BUGHUNTER = r"""
- ██████╗  ██╗   ██╗  ██████╗  ██╗  ██╗ ██╗   ██╗ ███╗   ██╗ ████████╗ ███████╗ ██████╗
- ██╔══██╗ ██║   ██║ ██╔════╝  ██║  ██║ ██║   ██║ ████╗  ██║ ╚══██╔══╝ ██╔════╝ ██╔══██╗
- ██████╔╝ ██║   ██║ ██║  ███╗ ███████║ ██║   ██║ ██╔██╗ ██║    ██║    █████╗   ██████╔╝
- ██╔══██╗ ██║   ██║ ██║   ██║ ██╔══██║ ██║   ██║ ██║╚██╗██║    ██║    ██╔══╝   ██╔══██╗
- ██████╔╝ ╚██████╔╝ ╚██████╔╝ ██║  ██║ ╚██████╔╝ ██║ ╚████║    ██║    ███████╗ ██║  ██║
- ╚═════╝   ╚═════╝   ╚═════╝  ╚═╝  ╚═╝  ╚═════╝  ╚═╝  ╚═══╝    ╚═╝    ╚══════╝ ╚═╝  ╚═╝
+ _     __         ____ _
+|_)| |/__|_|| ||\ |||_|_)
+|_)|_|\_|| ||_|| \|||_| \
 """
 
-# ─── ASCII text: HARNESS (block, 6 rows) ───────────────────────────────
+# ─── ASCII text: HARNESS (3 rows, ~23 cols — mini figlet) ──────────────
 _HARNESS = r"""
- ██╗  ██╗  █████╗  ██████╗  ███╗   ██╗ ███████╗ ███████╗ ███████╗
- ██║  ██║ ██╔══██╗ ██╔══██╗ ████╗  ██║ ██╔════╝ ██╔════╝ ██╔════╝
- ███████║ ███████║ ██████╔╝ ██╔██╗ ██║ █████╗   ███████╗ ███████╗
- ██╔══██║ ██╔══██║ ██╔══██╗ ██║╚██╗██║ ██╔══╝   ╚════██║ ╚════██║
- ██║  ██║ ██║  ██║ ██║  ██║ ██║ ╚████║ ███████╗ ███████║ ███████║
- ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═══╝ ╚══════╝ ╚══════╝ ╚══════╝
+        _      _ __ __
+|_| /\ |_)|\ ||_(_ (_
+| |/--\| \| \||___)__)
 """
 
-# ─── ASCII text: LITE (block, 6 rows) ──────────────────────────────────
+# ─── ASCII text: LITE (3 rows, ~10 cols — mini figlet) ─────────────────
 _LITE = r"""
- ██╗      ██╗ ████████╗ ███████╗
- ██║      ██║ ╚══██╔══╝ ██╔════╝
- ██║      ██║    ██║    █████╗
- ██║      ██║    ██║    ██╔══╝
- ███████╗ ██║    ██║    ███████╗
- ╚══════╝ ╚═╝    ╚═╝    ╚══════╝
+  _______
+|  |  ||_
+|__|_ ||_
 """
 
-# ─── MANU + beetle side by side (6 rows) ───────────────────────────────
-# The beetle is stitched to the right of MANU on the same 6 lines so the
-# whole third block sits on the same vertical strip as the two above.
-#     Beetle art (7 cols wide, 6 rows) — a stylised scarab:
-#          .--.
-#       .-(    ).-.
-#      /   ,__,   \
-#     ((=(  ⚫⚫  )=))
-#      \   \__/   /
-#       `-.____.-'
+# ─── MANU + beetle side by side (3 rows, ~28 cols total) ───────────────
+# The beetle sits to the right of MANU on the same 3 lines so the block
+# keeps the same vertical strip as the others.
 _MANU_BEETLE = r"""
- ███╗   ███╗  █████╗  ███╗   ██╗ ██╗   ██╗            .--.
- ████╗ ████║ ██╔══██╗ ████╗  ██║ ██║   ██║         .-(    ).-.
- ██╔████╔██║ ███████║ ██╔██╗ ██║ ██║   ██║        /   ,__,   \
- ██║╚██╔╝██║ ██╔══██║ ██║╚██╗██║ ██║   ██║      ((=(  o  o  )=))
- ██║ ╚═╝ ██║ ██║  ██║ ██║ ╚████║ ╚██████╔╝        \   \__/   /
- ╚═╝     ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═══╝  ╚═════╝          `-.____.-'
+                 .--.
+|\/| /\ |\ || | ((oo))
+|  |/--\| \||_|  `--'
 """
 
 
-_TAGLINE = "autonomous local-LLM pentest agent · rate-limited · scope-gated · redact-by-default"
+# Two-line compact tagline (fits ~40 cols on portrait mobile).
+_TAGLINE_1 = "autonomous local-LLM pentest agent"
+_TAGLINE_2 = "rate · scope · redact"
 
 
 def _colors_ok() -> bool:
@@ -90,17 +82,17 @@ def render_banner(color: bool | None = None) -> str:
         color = _colors_ok()
     parts = [_BUGHUNTER, _HARNESS, _LITE, _MANU_BEETLE]
     body = "\n".join(p.rstrip() for p in parts)
-    tagline_line = f"    {_TAGLINE}"
+    tagline = f"  {_TAGLINE_1}\n  {_TAGLINE_2}"
     if color:
         return (f"{_RED}{body}{_RESET}\n"
-                f"{_DIM}{tagline_line}{_RESET}\n")
-    return f"{body}\n{tagline_line}\n"
+                f"{_DIM}{tagline}{_RESET}\n")
+    return f"{body}\n{tagline}\n"
 
 
 def print_banner() -> None:
     """Print the banner to stderr (so it doesn't mix with tool JSON on
-    stdout). No-op if colors are disabled AND stdin/stdout look non-
-    interactive — keeps `python harness.py --help | less` clean."""
+    stdout). No-op if it can't render for any reason — the banner is
+    decorative, never critical."""
     try:
         sys.stderr.write(render_banner())
         sys.stderr.flush()
