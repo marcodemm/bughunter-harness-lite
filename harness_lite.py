@@ -217,6 +217,25 @@ Rules ENFORCED IN CODE (you cannot bypass them, do not try):
 - No pipes, redirects, sudo, rm, or destructive HTTP verbs.
 - Tool output is redacted for secrets before you see it.
 
+━━━ IMPORTANT — tool errors are NOT a signal to give up ━━━
+
+If a tool returns "ERROR: ...", "shell timeout", "exit=1", HTTP 4xx, or
+an empty body, that is DATA, not the end of the run. Adapt and keep
+going:
+- Shell timeout on wpscan → try a lighter variant with fewer threads
+  (`-t 5` or `-t 3`) or fall back to `nuclei -id wordpress-detect`.
+- Shell timeout on nuclei bulk → switch to a single template (`-id X`).
+- HTTP 403 / 401 → note that the path EXISTS and is protected — that is
+  fingerprint signal, not a dead end.
+- HTTP 404 → note the path does NOT exist, move on to the next one.
+- `ERROR: 'X' not in shell allowlist` → the tool is not available on
+  lite; move on to something in the allowlist.
+- `ERROR: shell denylist match 'Y'` → your command had a forbidden char
+  (`|`, `;`, `>`, `<`, backticks). Rewrite the command without it.
+
+Do NOT call finish() immediately after a tool error. Try at least one
+alternative first, then continue with the checklist.
+
 ━━━ IMPORTANT — placeholders in this prompt are not variables ━━━
 
 Anything you see in angle brackets in this prompt (e.g. `<host>`, `<url>`,
@@ -253,10 +272,15 @@ Per detected stack (look at Set-Cookie, X-Powered-By, X-Redirect-By,
 Server, meta generator in HTML):
 - WordPress  (X-Redirect-By: WordPress, /wp-*, wp-json):
     http_get /wp-login.php, /wp-json/wp/v2/users,
-    run_shell "wpscan --url <full_url> --enumerate vp,vt --random-user-agent"
-    (--enumerate vp,vt = vulnerable plugins + vulnerable themes; do NOT
-     combine p and vp — wpscan rejects the mix. Omit --api-token unless
-     the operator has WPSCAN_API_TOKEN set.)
+    run_shell "wpscan --url <full_url> --enumerate vp --random-user-agent
+              --disable-tls-checks -t 5"
+    (--enumerate vp = vulnerable plugins ONLY, fastest useful mode.
+     Do NOT combine p and vp — wpscan rejects the mix.
+     -t 5 caps threads so it finishes in a couple of minutes on ARM.
+     Omit --api-token unless the operator has WPSCAN_API_TOKEN set.
+     If wpscan still times out, fall back to
+     run_shell "nuclei -id wordpress-detect -u <full_url>" — cheap,
+     always finishes in seconds.)
 - Nginx / Apache banner in Server:
     run_shell "nuclei -id nginx-version -u URL" if you suspect a version;
     http_get /server-status  /nginx_status  /debug  /actuator/env
@@ -783,8 +807,11 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
                 f"{url}/api, {url}/api/v1, {url}/graphql, "
                 f"{url}/swagger.json, {url}/openapi.json. (4) If you "
                 f"detected WordPress in step (1) or (3), run via "
-                f"run_shell: 'wpscan --url {url} --enumerate vp,vt "
-                f"--random-user-agent'. (5) Run via run_shell: "
+                f"run_shell: 'wpscan --url {url} --enumerate vp "
+                f"--random-user-agent --disable-tls-checks -t 5' — if it "
+                f"times out or errors, fall back to "
+                f"'nuclei -id wordpress-detect -u {url}' (cheap, always "
+                f"finishes in seconds). (5) Run via run_shell: "
                 f"'subfinder -d {host}' and 'httpx -u {url} "
                 f"-status-code -title -tech-detect' to widen the surface. "
                 f"(6) If steps 1-5 surfaced a version banner or a common "

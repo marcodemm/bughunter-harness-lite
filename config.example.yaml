@@ -32,8 +32,16 @@ throttle:
 limits:
   max_iterations: 20                    # hard stop for one-shot mode
   max_iterations_per_repl_turn: 4       # per user message in REPL
-  max_wall_time_sec: 900                # hard stop at 15 minutes
-  shell_timeout_sec: 60                 # per-command cap for run_shell
+  max_wall_time_sec: 1500               # hard stop at 25 minutes
+  shell_timeout_sec: 300                # per-command cap for run_shell.
+                                        # 60s is too tight — wpscan with
+                                        # --enumerate vp -t 5 and nuclei
+                                        # with a single -id typically take
+                                        # 60-240s on ARM chroot. Bump
+                                        # higher (e.g. 600) if you plan to
+                                        # run wpscan --enumerate ap (all
+                                        # plugins, slow) or nuclei full
+                                        # tag scans (bulk template runs).
   http_timeout_sec: 20                  # per-request cap for http_get/post
 
 # ─────────── Pre-flight target reachability ──────────────────────────
