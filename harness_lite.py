@@ -792,16 +792,18 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-
-    # Banner — same as the desktop harness. Auto-disables when stderr isn't
-    # a TTY (piped, --help, NO_COLOR). Never raises.
+def _print_banner_safe() -> None:
+    """Print banner to stderr. Auto-disables when stderr isn't a TTY
+    (piped, --help, NO_COLOR). Never raises."""
     try:
         from banner import print_banner
         print_banner()
     except Exception:
         pass
+
+
+def main() -> int:
+    args = parse_args()
 
     cfg = load_config(Path(args.config))
 
@@ -824,7 +826,9 @@ def main() -> int:
         cfg["attribution_headers"] = attribution
 
     if args.objective:
-        # One-shot mode: no REPL, no HELP dump.
+        # One-shot mode: banner at the top (no prompt to stick it to),
+        # then straight to the run. No HELP_TEXT dump.
+        _print_banner_safe()
         state: dict[str, Any] = {
             "scope": list(args.scope) if args.scope else [],
             "headers": {},
@@ -835,8 +839,11 @@ def main() -> int:
         }
         return run_one_shot(cfg, args, state, args.objective)
 
-    # REPL mode: print HELP first (paridad con desktop harness), then loop.
+    # REPL mode: HELP first, then banner right before the prompt.
+    # Order requested by the operator (2026-09-11): banner should sit
+    # flush against the '>' so it's the last thing you see before typing.
     print(HELP_TEXT)
+    _print_banner_safe()
     return run_repl(cfg, args)
 
 
