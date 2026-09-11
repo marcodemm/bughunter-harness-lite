@@ -392,7 +392,49 @@ class Tools:
                     f"URL: {r.url}\n"
                     f"--- headers ---\n{headers_str}\n"
                     f"--- body ---\n{body}")
+        # Interpretive note for 4xx (except 404 which short-circuits above).
+        # Small models tend to read any non-200 as "endpoint exists and is
+        # a finding" — spell out the correct interpretation so the finish()
+        # summary stays honest.
+        note = self._4xx_interpretive_note(r.status_code, r.headers)
+        if note:
+            rendered += f"\n--- note ---\n{note}"
         return redact(rendered)
+
+    @staticmethod
+    def _4xx_interpretive_note(status: int, headers) -> str:
+        """Return a short guidance string for the LLM on how to interpret
+        401/403 responses. Returns '' for other status codes."""
+        if status == 401:
+            return (
+                "HTTP 401 = endpoint EXISTS but requires authentication. "
+                "This is fingerprint signal (the resource is real), NOT a "
+                "public finding on its own. Note the endpoint as "
+                "'authenticated' in the summary; do not claim it as an "
+                "exposed secret unless the body itself leaked something."
+            )
+        if status == 403:
+            server = str(headers.get("Server") or "").lower()
+            xrb = str(headers.get("X-Redirect-By") or "").lower()
+            hint = ""
+            if "cloudflare" in server or "cloudfront" in server:
+                hint = (" The Server header points at a CDN/WAF, so this "
+                        "403 may be a WAF block rather than an app-level "
+                        "denial.")
+            elif xrb == "wordpress":
+                hint = (" The X-Redirect-By: WordPress header means WP "
+                        "handled the request; a 403 here is usually the "
+                        "theme / .htaccess / WP hardening blocking access, "
+                        "not a bug.")
+            return (
+                "HTTP 403 = server responded but denied access. Possible "
+                "meanings: (a) the path exists and permissions block it "
+                "(useful fingerprint), (b) a WAF is intercepting the "
+                "request, (c) a catch-all deny rule with no signal. "
+                "Report it as an existing-but-protected path, NOT as a "
+                "publicly readable finding." + hint
+            )
+        return ""
 
     @staticmethod
     def _looks_like_host(tok: str) -> bool:

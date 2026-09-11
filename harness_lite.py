@@ -310,16 +310,16 @@ Server, meta generator in HTML):
         (fingerprint in seconds; almost never fails).
     Then http_get /wp-login.php and /wp-json/wp/v2/users.
     OPTIONALLY, if you still have budget:
-        run_shell "wpscan --url <full_url> --enumerate vp
-                  --random-user-agent --disable-tls-checks -t 5
-                  --request-timeout 20 --connect-timeout 10"
-    (--enumerate vp = vulnerable plugins ONLY, fastest useful mode.
+        run_shell "wpscan --url <full_url> --random-user-agent
+                  --disable-tls-checks -t 5 --request-timeout 20
+                  --connect-timeout 10"
+    (NO `--enumerate` on purpose — that keeps wpscan on its default
+     mode: detect WordPress, detect the version and the main theme,
+     stop. Finishes in ~30-60s and almost never times out.
+     If you want to enumerate vulnerable plugins, add
+     `--enumerate vp` — that takes 5-10 min on ARM and can time out,
+     so treat it as a MANUAL deep-scan, not an auto-checklist step.
      Do NOT combine p and vp — wpscan rejects the mix.
-     -t 5 caps threads; --request-timeout/--connect-timeout cap the
-     wait per HTTP request so wpscan cannot hang forever on a slow
-     endpoint. Full wpscan still can take 5-10 min on ARM chroot —
-     if you are running short on iterations skip it and rely on the
-     nuclei fingerprint above.
      Omit --api-token unless the operator has WPSCAN_API_TOKEN set.)
 - Nginx / Apache banner in Server:
     run_shell "nuclei -id nginx-version -u URL" if you suspect a version;
@@ -867,13 +867,17 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
                 f"Also run 'subfinder -d {sf_host}' (apex domain, no "
                 f"www.) and 'httpx -u {url} -status-code -title "
                 f"-tech-detect' to widen the surface. "
-                f"(5) OPTIONAL DEEP SCAN — only if you still have iters "
-                f"and time budget AND step (4) confirmed WordPress: run "
-                f"via run_shell 'wpscan --url {url} --enumerate vp "
-                f"--random-user-agent --disable-tls-checks -t 5 "
-                f"--request-timeout 20 --connect-timeout 10'. WPScan "
-                f"can take 5-10 min; if it times out that is OK — you "
-                f"already have the WordPress fingerprint from step (4). "
+                f"(5) OPTIONAL VERSION CONFIRM — only if step (4) "
+                f"confirmed WordPress: run via run_shell 'wpscan "
+                f"--url {url} --random-user-agent --disable-tls-checks "
+                f"-t 5 --request-timeout 20 --connect-timeout 10' — "
+                f"no --enumerate flag on purpose so wpscan stays on its "
+                f"lightweight default (detect + version + theme, ~30s). "
+                f"If step (5) times out that is OK — you already have "
+                f"the fingerprint from step (4). Do NOT re-run wpscan "
+                f"with --enumerate vp here (that takes 5-10 min); the "
+                f"operator will run that manually if they want a deep "
+                f"scan. "
                 f"(6) Only THEN call finish() with a summary that lists "
                 f"the stack (with version if known), the paths that "
                 f"returned interesting (skip 404s — those do not exist), "
