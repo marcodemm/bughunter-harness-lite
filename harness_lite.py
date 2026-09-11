@@ -357,14 +357,27 @@ suspect a stack (each is one call, cheap):
 ━━━ finish() summary format ━━━
 
 When you finally call finish(summary=...), the summary MUST include:
-  - The stack you fingerprinted (with version if possible).
-  - The paths you probed (mention the ones that returned interesting).
+  - The stack you fingerprinted. Include a VERSION only if you literally
+    saw it in a response header (Server, X-Powered-By, generator meta)
+    or in a tool output — DO NOT invent a version like "Nginx/1.20.6"
+    or "WordPress 5.7.3" that no tool actually returned. If you only
+    saw "Server: Apache" without a version number, write "Apache
+    (version not disclosed)".
+  - Group the probed paths BY STATUS CODE so the reader can tell
+    signal apart from noise:
+      * 200 OK           = path exists and is publicly readable.
+      * 401 / 403        = path EXISTS but is protected — this IS
+                           fingerprint signal, list them here.
+      * 301 / 302        = redirect; if it looks like a WordPress /
+                           framework catch-all, say so.
+      * 404              = path does NOT exist — do NOT mention it.
+    Do NOT collapse all non-200 responses into a single "no obvious
+    fingerprints" line — that hides the 401/403 signal.
   - Any credential/token you saw (with the last 4 chars redacted,
     e.g. "PHPSESSID cookie present (…ab12)").
   - Any suspected finding + how to reproduce it in one line.
   - If truly nothing was found, list WHAT you tried so the operator can
-    decide the next angle. "No obvious fingerprints" alone is a bad
-    summary — do not use that.
+    decide the next angle.
 """
 
 
@@ -901,10 +914,18 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
                 f"install takes 5-10 min and consistently times out. "
                 f"The operator will dispatch it manually via `/run "
                 f"wpscan ...` from the REPL if they want a deep scan. "
-                f"(6) Only THEN call finish() with a summary that lists "
-                f"the stack (with version if known), the paths that "
-                f"returned interesting (skip 404s — those do not exist), "
-                f"and any suspected finding."
+                f"(6) Only THEN call finish() with a summary STRUCTURED "
+                f"as: 'Stack: <stack + version ONLY if you literally saw "
+                f"it in a Server / X-Powered-By / generator meta / tool "
+                f"output — DO NOT invent a version you did not see>. "
+                f"Paths 200 OK: [list]. Paths 401/403 (exist but "
+                f"protected — real fingerprint signal): [list]. Paths "
+                f"301/302 (catch-all redirects, low info): [list]. "
+                f"Suspected finding: <one-line or none>.' Skip 404 "
+                f"paths entirely — those do NOT exist. Do NOT lump all "
+                f"non-200 responses under 'no obvious fingerprints' — "
+                f"401 and 403 confirm the path exists and are useful "
+                f"signal even when you cannot read the body."
             )
         rc = run_one_shot(cfg, cli_args, state, objective)
         if rc == 130:
