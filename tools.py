@@ -173,7 +173,8 @@ class Tools:
                  attribution_headers: dict[str, str],
                  oob_host: str = "", oob_token_prefix: str = "lite",
                  shell_timeout_sec: int = 60,
-                 http_timeout_sec: int = 20):
+                 http_timeout_sec: int = 20,
+                 scope_mode: str = "strict"):
         self.scope = scope
         self.rate = rate
         self.attribution_headers = dict(attribution_headers)
@@ -187,9 +188,36 @@ class Tools:
         )[:20] or "lite"
         self.shell_timeout_sec = shell_timeout_sec
         self.http_timeout_sec = http_timeout_sec
+        # scope_enforcement: how strict is the scope gate?
+        #   strict → out-of-scope host = ERROR, tool refuses.
+        #   warn   → out-of-scope host = [WARN] prefixed, tool RUNS anyway.
+        #   off    → no gate at all.
+        # Same three modes as the desktop bughunter-harness so an operator
+        # switching between them gets identical behaviour.
+        self.scope_mode = (scope_mode or "strict").lower()
+        if self.scope_mode not in ("strict", "warn", "off"):
+            self.scope_mode = "strict"
         self.finished: bool = False
         self.finish_summary: str = ""
         self._oob_counter = 0
+
+    def _scope_gate(self, host: str) -> tuple[bool, str]:
+        """Decide whether `host` passes the scope gate.
+        Returns (allowed, prefix_to_prepend_to_output)."""
+        if not host:
+            return (True, "")
+        if self.scope_mode == "off":
+            return (True, "")
+        if self.scope.is_in_scope(host):
+            return (True, "")
+        if self.scope_mode == "warn":
+            return (True, f"[WARN] host '{host}' not in scope "
+                          f"(scope_enforcement=warn — allowed, audit "
+                          f"manually).\n")
+        # strict
+        return (False, f"ERROR: host '{host}' not in scope. "
+                       f"Add to scope.txt or --scope, or relax "
+                       f"config.scope_enforcement to 'warn'.")
 
     # ── entry point ───────────────────────────────────────────────────
     def dispatch(self, name: str, args: dict[str, Any]) -> str:
@@ -215,31 +243,33 @@ class Tools:
     def _http_get(self, args: dict) -> str:
         url = str(args.get("url", "")).strip()
         headers = dict(args.get("headers") or {})
-        in_scope, host = _is_scope_host(self.scope, url)
-        if not in_scope:
-            return f"ERROR: host '{host}' not in scope"
+        _, host = _is_scope_host(self.scope, url)
+        allowed, prefix = self._scope_gate(host)
+        if not allowed:
+            return prefix
         self.rate.wait()
         merged = {**self.attribution_headers, **headers}
         r = requests.get(url, headers=merged,
                          timeout=self.http_timeout_sec,
                          allow_redirects=False, verify=False)
-        return self._format_http(r)
+        return prefix + self._format_http(r)
 
     def _http_post(self, args: dict) -> str:
         url = str(args.get("url", "")).strip()
         body = args.get("body", "")
         content_type = str(args.get("content_type") or "application/json")
         headers = dict(args.get("headers") or {})
-        in_scope, host = _is_scope_host(self.scope, url)
-        if not in_scope:
-            return f"ERROR: host '{host}' not in scope"
+        _, host = _is_scope_host(self.scope, url)
+        allowed, prefix = self._scope_gate(host)
+        if not allowed:
+            return prefix
         self.rate.wait()
         merged = {"Content-Type": content_type,
                   **self.attribution_headers, **headers}
         r = requests.post(url, headers=merged, data=body,
                           timeout=self.http_timeout_sec,
                           allow_redirects=False, verify=False)
-        return self._format_http(r)
+        return prefix + self._format_http(r)
 
     def _run_shell(self, args: dict) -> str:
         cmd = str(args.get("command", "")).strip()
@@ -265,19 +295,24 @@ class Tools:
                 return ("ERROR: nuclei must be called with -id <template> "
                         "on lite (bulk template runs are excluded).")
         # Best-effort scope check for tools that take a URL/host as first arg
+        prefix = ""
         for i, tok in enumerate(parts[1:], start=1):
             if tok.startswith("http://") or tok.startswith("https://"):
-                in_scope, host = _is_scope_host(self.scope, tok)
-                if not in_scope:
+                _, host = _is_scope_host(self.scope, tok)
+                allowed, p = self._scope_gate(host)
+                if not allowed:
                     return f"ERROR: shell arg host '{host}' not in scope"
+                prefix = p
                 break
             if tok.startswith("-"):
                 continue
             # Bare host as positional (subfinder -d example.com etc.)
             if "." in tok and "/" not in tok and self._looks_like_host(tok):
-                in_scope, host = _is_scope_host(self.scope, tok)
-                if not in_scope:
+                _, host = _is_scope_host(self.scope, tok)
+                allowed, p = self._scope_gate(host)
+                if not allowed:
                     return f"ERROR: shell arg host '{host}' not in scope"
+                prefix = p
                 break
         self.rate.wait()
         t0 = time.monotonic()
@@ -300,7 +335,7 @@ class Tools:
         MAX = 4000
         if len(out) > MAX:
             out = out[:MAX] + f"\n[...truncated {len(out) - MAX} chars]"
-        return redact(f"[exit={proc.returncode}]\n{out}")
+        return prefix + redact(f"[exit={proc.returncode}]\n{out}")
 
     def _oob_generate(self, args: dict) -> str:
         purpose = str(args.get("purpose") or "hit").strip().lower()

@@ -141,9 +141,20 @@ SCOPE (in-scope allowlist)
     127.0.0.1            loopback
     # ... a comment      lines starting with # are ignored (file only)
 
-  Enforcement is HARD: every http_get / http_post request and every run_shell
-  URL/host argument is checked against scope. Out-of-scope → ERROR to the
-  model, no request goes out.
+  Enforcement is controlled by config.yaml → scope_enforcement:
+    strict → out-of-scope host = ERROR, tool refuses. Recommended for
+             real bug-bounty engagements where "in-scope only" is
+             non-negotiable.
+    warn   → out-of-scope host = [WARN …] prefix on the result, tool
+             RUNS anyway. Handy for lab / dev where you want subfinder
+             on the apex even though only `www.HOST` is in scope.
+             Default in `config.example.yaml`? strict. Bump to warn in
+             your local config.yaml for parity with the desktop harness
+             (which defaults to warn).
+    off    → no gate. Tests only. Never use against a real target.
+
+  Every http_get / http_post request and every run_shell URL/host
+  argument is checked against scope with this policy.
 
 OBJECTIVE EXAMPLES  (copy-paste one)
 
@@ -916,11 +927,15 @@ def run_one_shot(cfg: dict, cli_args: argparse.Namespace,
     oob_cfg = cfg.get("oob") or {}
     oob_host = str(oob_cfg.get("host") or "").strip()
     oob_token_prefix = str(oob_cfg.get("token_prefix") or "lite").strip()
+    # scope_enforcement: strict | warn | off. Same three modes as the
+    # desktop bughunter-harness (see its tools.py::_scope_gate).
+    scope_mode = str(cfg.get("scope_enforcement") or "strict").lower()
     tools = Tools(scope=scope, rate=rate,
                   attribution_headers=attribution,
                   oob_host=oob_host, oob_token_prefix=oob_token_prefix,
                   shell_timeout_sec=int(lim_cfg.get("shell_timeout_sec", 60)),
-                  http_timeout_sec=int(lim_cfg.get("http_timeout_sec", 20)))
+                  http_timeout_sec=int(lim_cfg.get("http_timeout_sec", 20)),
+                  scope_mode=scope_mode)
 
     # Session
     sess = Session(SESSIONS_DIR, objective=objective, config_snapshot={

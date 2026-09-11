@@ -60,6 +60,19 @@ preflight:
   strict: false
   timeout_sec: 10
 
+# ─────────── Scope enforcement policy ────────────────────────────────
+# How strict is the scope check on every http_get / http_post / run_shell?
+#   strict → out-of-scope host = ERROR, tool refuses. Default for real
+#            bug-bounty engagements where "in-scope only" is non-
+#            negotiable.
+#   warn   → out-of-scope host = [WARN …] prefix on the result, tool
+#            RUNS anyway. Handy for lab / dev where you want e.g.
+#            `subfinder -d example.com` even though only
+#            `www.example.com` is in scope. Matches the desktop
+#            bughunter-harness default.
+#   off    → no gate at all. Tests only. Never against a real target.
+scope_enforcement: "strict"
+
 # ─────────── Attribution headers ─────────────────────────────────────
 # Sent on every http_get/http_post so the target's SOC can see where the
 # traffic comes from. Set your researcher handle here — every platform

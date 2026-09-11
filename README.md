@@ -244,7 +244,15 @@ is written to the JSONL) and exits with code 130.
 - The scope allowlist is checked in code on every `http_get` /
   `http_post` (target host) and on `run_shell` (first URL-looking arg,
   or first positional bare-host arg — belt for tools like
-  `subfinder -d`).
+  `subfinder -d`). Enforcement is controlled by
+  `config.yaml` → `scope_enforcement`:
+    - `strict` (default in `config.example.yaml`) — out-of-scope host =
+      ERROR, tool refuses.
+    - `warn` (default in the desktop `bughunter-harness`) — out-of-scope
+      host = `[WARN …]` prefix on the result, tool RUNS anyway. Handy
+      for lab / dev where you want `subfinder -d example.com` even
+      though only `www.example.com` is in scope.
+    - `off` — no gate. Tests only.
 - The rate limiter is global and enforced with a `threading.Lock`.
 - The shell binary allowlist is short on purpose. Every addition is an
   audit item. `nuclei` is gated on `-id <template>` because bulk template
