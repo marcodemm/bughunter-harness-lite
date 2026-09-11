@@ -1,0 +1,18 @@
+# bughunter-harness-lite scope allowlist
+# ─────────────────────────────────────────────────────────────────────
+# One host / wildcard / CIDR per line. Lines starting with # are ignored.
+# All hosts you want the agent to touch MUST appear here — the tools
+# gate refuses anything else, with no exceptions.
+#
+# Supported entries:
+#   exact host:      example.com
+#   wildcard sub:    *.example.com     (matches any sub of example.com,
+#                                       NOT the apex — add both if you want both)
+#   exact IP:        10.0.0.1
+#   CIDR:            10.0.0.0/24
+#
+# The example below uses RFC 2606 reserved names — replace with the hosts
+# from your bug-bounty program's actual scope page before running.
+
+example.com
+*.example.com

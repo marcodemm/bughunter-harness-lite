@@ -1,0 +1,25 @@
+# Local config with real handles / api keys / oob host
+config.yaml
+scope.txt
+
+# Session logs (may contain redacted-but-still-sensitive target output)
+sessions/
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
