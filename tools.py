@@ -157,12 +157,20 @@ class Tools:
 
     def __init__(self, scope: ScopeChecker, rate: RateLimiter,
                  attribution_headers: dict[str, str],
-                 oob_host: str = "", shell_timeout_sec: int = 60,
+                 oob_host: str = "", oob_token_prefix: str = "lite",
+                 shell_timeout_sec: int = 60,
                  http_timeout_sec: int = 20):
         self.scope = scope
         self.rate = rate
         self.attribution_headers = dict(attribution_headers)
         self.oob_host = oob_host.rstrip("/")
+        # Prefix stamped on every OOB token so multiple harnesses hitting the
+        # same catcher panel stay distinguishable (e.g. `harness-*` for the
+        # desktop pipeline vs `lite-*` for this one).
+        _pref = (oob_token_prefix or "lite").strip().lower()
+        self.oob_token_prefix = "".join(
+            c for c in _pref if c.isalnum() or c in "-_"
+        )[:20] or "lite"
         self.shell_timeout_sec = shell_timeout_sec
         self.http_timeout_sec = http_timeout_sec
         self.finished: bool = False
@@ -281,7 +289,8 @@ class Tools:
             return ("ERROR: no oob_host configured. Set oob.host in "
                     "config.yaml.")
         self._oob_counter += 1
-        token = f"lite-{purpose or 'hit'}-{int(time.time())}-{self._oob_counter:03d}"
+        token = (f"{self.oob_token_prefix}-{purpose or 'hit'}-"
+                 f"{int(time.time())}-{self._oob_counter:03d}")
         return f"{self.oob_host}/oob/{token}"
 
     def _finish(self, args: dict) -> str:

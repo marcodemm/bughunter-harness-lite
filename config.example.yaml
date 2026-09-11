@@ -61,6 +61,10 @@ attribution_headers:
 # The oob_generate_token() tool returns URLs under this host. Point it at
 # YOUR OWN OOB infrastructure — never at a third-party service (data would
 # leak to whoever runs it). Format returned by the tool:
-#   https://<host>/oob/lite-<purpose>-<epoch>-<counter>
+#   https://<host>/oob/<token_prefix>-<purpose>-<epoch>-<counter>
+# `token_prefix` lets you tell hits apart when multiple harnesses share the
+# same catcher panel (e.g. "harness" for the desktop pipeline, "lite" for
+# this one, "burp" if you also fire OOBs from Burp Collaborator, etc.).
 oob:
   host: ""                      # e.g. https://oob.your-domain.example
+  token_prefix: "lite"          # keep alnum + '-' / '_'; max 20 chars

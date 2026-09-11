@@ -385,10 +385,12 @@ def main() -> int:
     throttle_cfg = cfg.get("throttle") or {}
     rate = RateLimiter(float(throttle_cfg.get("min_interval_sec", 1.0)))
     attribution = dict(cfg.get("attribution_headers") or {})
-    oob_host = str((cfg.get("oob") or {}).get("host") or "").strip()
+    oob_cfg = cfg.get("oob") or {}
+    oob_host = str(oob_cfg.get("host") or "").strip()
+    oob_token_prefix = str(oob_cfg.get("token_prefix") or "lite").strip()
     tools = Tools(scope=scope, rate=rate,
                   attribution_headers=attribution,
-                  oob_host=oob_host,
+                  oob_host=oob_host, oob_token_prefix=oob_token_prefix,
                   shell_timeout_sec=int(lim_cfg.get("shell_timeout_sec", 60)),
                   http_timeout_sec=int(lim_cfg.get("http_timeout_sec", 20)))
 
