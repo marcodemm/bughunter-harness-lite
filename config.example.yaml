@@ -33,17 +33,19 @@ limits:
   max_iterations: 20                    # hard stop for one-shot mode
   max_iterations_per_repl_turn: 4       # per user message in REPL
   max_wall_time_sec: 1500               # hard stop at 25 minutes
-  shell_timeout_sec: 400                # per-command cap for run_shell.
-                                        # 60s is too tight — wpscan with
-                                        # --enumerate vp -t 5 --request-
-                                        # timeout 20 --connect-timeout 10
-                                        # and nuclei with a single -id
-                                        # typically take 60-300s on ARM
-                                        # chroot. Bump higher (e.g. 600)
-                                        # if you plan to run wpscan
-                                        # --enumerate ap (all plugins,
-                                        # slow) or nuclei full tag scans
-                                        # (bulk template runs).
+  shell_timeout_sec: 600                # per-command cap for run_shell
+                                        # (10 min). wpscan with the
+                                        # timeout-hardened flags
+                                        # (--enumerate vp -t 5
+                                        # --request-timeout 20
+                                        # --connect-timeout 10) plus
+                                        # nuclei -id runs typically fit
+                                        # in 60-450s on ARM chroot / Mac.
+                                        # Bump higher if you plan to run
+                                        # wpscan --enumerate ap (all
+                                        # plugins) or nuclei bulk tag
+                                        # scans; lower it if you want
+                                        # tighter iteration budgets.
   http_timeout_sec: 20                  # per-request cap for http_get/post
 
 # ─────────── Pre-flight target reachability ──────────────────────────

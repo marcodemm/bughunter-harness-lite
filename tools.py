@@ -19,6 +19,7 @@ Every call goes through: scope check → rate limit → shell allowlist/denylist
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -30,6 +31,19 @@ import requests
 from redact import redact
 from scope import ScopeChecker
 from throttle import RateLimiter
+
+# Strip ANSI escape sequences (colors, cursor moves, etc.) from tool
+# output. Tools like nuclei/httpx/subfinder colorize their stdout with
+# escapes like `\x1b[92mfoo\x1b[0m`; the LLM sees those as noise and
+# they inflate the context budget. This regex matches the CSI (Control
+# Sequence Introducer) family plus OSC (Operating System Command) — enough
+# to cover 100% of what these CLIs actually emit.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07")
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s or "")
+
 
 # Allowed first-token of any shell command. Kept short on purpose — every
 # addition is an audit item.
@@ -274,8 +288,14 @@ class Tools:
             elapsed = time.monotonic() - t0
             return (f"ERROR: shell timeout after {elapsed:.1f}s "
                     f"(cap {self.shell_timeout_sec}s)")
-        out = (proc.stdout or "") + (
-            f"\n[stderr]\n{proc.stderr}" if proc.stderr else "")
+        # Strip ANSI colors from both streams — projectdiscovery tools
+        # (nuclei/httpx/subfinder), rich-formatted CLIs and any Ruby gem
+        # that respects TTY emit color codes that only add noise for an
+        # LLM consumer.
+        stdout_clean = _strip_ansi(proc.stdout or "")
+        stderr_clean = _strip_ansi(proc.stderr or "")
+        out = stdout_clean + (
+            f"\n[stderr]\n{stderr_clean}" if stderr_clean else "")
         # Cap output to keep the LLM context tight
         MAX = 4000
         if len(out) > MAX:

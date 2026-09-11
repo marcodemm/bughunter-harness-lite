@@ -830,6 +830,11 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
             else:
                 host = t.split("/", 1)[0].split(":", 1)[0]
                 url = f"https://{host}"
+            # subfinder wants the APEX to enumerate subs; a `www.` prefix
+            # is a universal alias for the apex, so strip it for subfinder
+            # only. Other prefixes (api. / admin. / dev. …) stay as-is —
+            # those are legitimate subs the operator explicitly targeted.
+            sf_host = host[4:] if host.startswith("www.") else host
             objective = (
                 f"Recon {url}. Do all of the following before calling "
                 f"finish(): (1) http_get {url} and read the response "
@@ -848,9 +853,9 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
                 f"detection says nginx/apache instead, retry with "
                 f"'nuclei -id nginx-version -u {url}' or "
                 f"'nuclei -id http-missing-security-headers -u {url}'. "
-                f"Also run 'subfinder -d {host}' and "
-                f"'httpx -u {url} -status-code -title -tech-detect' to "
-                f"widen the surface. "
+                f"Also run 'subfinder -d {sf_host}' (apex domain, no "
+                f"www.) and 'httpx -u {url} -status-code -title "
+                f"-tech-detect' to widen the surface. "
                 f"(5) OPTIONAL DEEP SCAN — only if you still have iters "
                 f"and time budget AND step (4) confirmed WordPress: run "
                 f"via run_shell 'wpscan --url {url} --enumerate vp "
