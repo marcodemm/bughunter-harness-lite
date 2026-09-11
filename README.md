@@ -112,10 +112,22 @@ For cloud (OpenAI / Anthropic / Google Gemini / NVIDIA NIM), set
 `llm.servertype` explicitly and either put `llm.api_key` in the config
 or set `llm.api_key_env` to the env var name.
 
-**Recommended model** on an 8 GB phone: any 3B–7B fine-tune with
-function-calling. The default in `config.example.yaml` is
-`bughunter-v9`, a 3B fine-tune trained by the author of this repo for
-bug-bounty workflows; substitute your own if you prefer.
+**⭐ Recommended model — `Qwen2.5-VL-3B-uncensored-bughunter-v9`**
+([mmp2055/Qwen2.5-VL-3B-uncensored-bughunter-v9 on Hugging Face](https://huggingface.co/mmp2055/Qwen2.5-VL-3B-uncensored-bughunter-v9)).
+A Qwen 2.5 VL 3B fine-tune trained specifically for mobile bug-bounty
+workflows: same behaviour focus as the desktop harness'
+[Qwen3.5-35B-A3B-uncensored-bughunter-v8](https://huggingface.co/mmp2055/Qwen3.5-35B-A3B-uncensored-bughunter-v8)
+(concrete tool calls over hand-wavy prose, knows nuclei / httpx /
+subfinder / wpscan / ffuf / gau flags without hand-holding, doesn't
+refuse lab-only default-cred probes on DVWA / Juice Shop / Mutillidae)
+but sized for an 8 GB phone. Fits comfortably inside a Termux + Kali
+NetHunter chroot with Ollama. The default `llm.model` in
+[`config.example.yaml`](config.example.yaml) is pinned to `bughunter-v9`
+so it works out of the box once you import the GGUF into Ollama;
+substitute your own model if you prefer.
+
+Any other 3B–7B fine-tune with function-calling support will also
+work — just point `llm.model` at the id your backend serves.
 
 Tips for Ollama on Android:
 
