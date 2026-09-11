@@ -30,6 +30,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 import urllib3
@@ -44,6 +45,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Local modules
 from llm import LLMClient, resolve_backend
+from progress import Spinner
 from redact import redact
 from scope import ScopeChecker
 from session import Session
@@ -215,6 +217,19 @@ Rules ENFORCED IN CODE (you cannot bypass them, do not try):
 - No pipes, redirects, sudo, rm, or destructive HTTP verbs.
 - Tool output is redacted for secrets before you see it.
 
+━━━ IMPORTANT — placeholders in this prompt are not variables ━━━
+
+Anything you see in angle brackets in this prompt (e.g. `<host>`, `<url>`,
+`<full_url>`, `<template>`) is a PLACEHOLDER for you to substitute. The
+shell will treat `<host>` literally and refuse the command. Extract the
+actual hostname / URL from the operator's objective before you build the
+command. Example:
+    Operator's target: https://www.example.com
+    WRONG:  run_shell("subfinder -d <host>")
+    RIGHT:  run_shell("subfinder -d www.example.com")
+    WRONG:  run_shell("httpx -u <host> -status-code -title")
+    RIGHT:  run_shell("httpx -u https://www.example.com -status-code -title")
+
 ━━━ PERSISTENCE RULES (this is the important part) ━━━
 
 DO NOT call finish() after 1 or 2 tool calls. A useful run needs AT LEAST
@@ -238,8 +253,10 @@ Per detected stack (look at Set-Cookie, X-Powered-By, X-Redirect-By,
 Server, meta generator in HTML):
 - WordPress  (X-Redirect-By: WordPress, /wp-*, wp-json):
     http_get /wp-login.php, /wp-json/wp/v2/users,
-    run_shell "wpscan --url URL --enumerate p,vp,vt --api-token X --random-user-agent"
-    (skip --api-token if the operator has not configured wpscan).
+    run_shell "wpscan --url <full_url> --enumerate vp,vt --random-user-agent"
+    (--enumerate vp,vt = vulnerable plugins + vulnerable themes; do NOT
+     combine p and vp — wpscan rejects the mix. Omit --api-token unless
+     the operator has WPSCAN_API_TOKEN set.)
 - Nginx / Apache banner in Server:
     run_shell "nuclei -id nginx-version -u URL" if you suspect a version;
     http_get /server-status  /nginx_status  /debug  /actuator/env
@@ -375,6 +392,14 @@ def target_from_objective(objective: str) -> str:
 # ────────────────────────────────────────────────────────────────────────
 # agent loop  (LLM ↔ tools)
 # ────────────────────────────────────────────────────────────────────────
+def _fmt_secs(s: float) -> str:
+    """Compact HH:MM:SS / MM:SS for the progress prefix."""
+    s = int(s)
+    if s >= 3600:
+        return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
 def run_agent_loop(client: LLMClient, tools: Tools, sess: Session,
                    messages: list[dict], max_iterations: int,
                    max_wall_time_sec: int,
@@ -383,6 +408,7 @@ def run_agent_loop(client: LLMClient, tools: Tools, sess: Session,
     Return the number of iterations executed."""
     t0 = time.monotonic()
     iters = 0
+    tool_call_total = 0
     while iters < max_iterations:
         elapsed = time.monotonic() - t0
         if elapsed >= max_wall_time_sec:
@@ -391,10 +417,23 @@ def run_agent_loop(client: LLMClient, tools: Tools, sess: Session,
                   f"after {iters} iterations.")
             break
         iters += 1
+
+        # Progress prefix — one line per iter, minimal and greppable.
+        # `iter N/max · WALL · tools=K`
+        prefix = (f"\n──[ iter {iters}/{max_iterations} · "
+                  f"{_fmt_secs(elapsed)}/{_fmt_secs(max_wall_time_sec)} · "
+                  f"tools={tool_call_total} ]──")
+        print(prefix)
+
+        # Spinner while the LLM is thinking (stderr, TTY-only; on non-TTY
+        # a one-liner is printed instead — same behaviour as the desktop
+        # harness).
         try:
-            reply = client.chat(messages, tools=openai_schemas(),
-                                temperature=temperature,
-                                max_tokens=max_tokens)
+            with Spinner(f"LLM thinking (iter {iters})",
+                         timeout_sec=max(60, int(client.timeout_sec))):
+                reply = client.chat(messages, tools=openai_schemas(),
+                                    temperature=temperature,
+                                    max_tokens=max_tokens)
         except Exception as e:
             sess.write("kill", reason=f"llm error: {type(e).__name__}: {e}")
             print(f"\n[error] LLM call failed: {e}")
@@ -406,7 +445,30 @@ def run_agent_loop(client: LLMClient, tools: Tools, sess: Session,
         if content:
             print(f"\n[assistant]\n{redact(content).rstrip()}")
         if not tool_calls and not content:
-            sess.write("kill", reason="empty reply")
+            reason = "empty reply"
+            hint = ""
+            # Cheap heuristic: if we've spent a lot of tool calls or the
+            # message history has grown big, the model likely hit its
+            # context window. This is what happens with a 3B on Ollama
+            # with num_ctx=4096 after ~15 tool calls with verbose HTTP
+            # headers. Report it explicitly so the operator knows how to
+            # unblock (bump num_ctx, or trim the objective).
+            if tool_call_total >= 8 or len(messages) >= 20:
+                reason = "empty reply (likely context window exhausted)"
+                hint = (
+                    f"\n    Hint: the model returned no content and no "
+                    f"tool_calls after {tool_call_total} tool calls / "
+                    f"{len(messages)} messages. Its context window is "
+                    f"probably full. Options:\n"
+                    f"      1. In your Ollama Modelfile bump "
+                    f"'PARAMETER num_ctx' to 8192 or 16384 (needs more "
+                    f"RAM) and reload the model.\n"
+                    f"      2. Break the objective into smaller REPL "
+                    f"turns instead of one long checklist.\n"
+                    f"      3. Use a bigger model that has more room."
+                )
+            sess.write("kill", reason=reason)
+            print(f"\n[kill] {reason}.{hint}")
             break
         messages.append({"role": "assistant",
                          "content": content,
@@ -421,7 +483,16 @@ def run_agent_loop(client: LLMClient, tools: Tools, sess: Session,
                 args = {}
             sess.write("tool_call", name=name, args=args)
             print(f"[tool] {name}({_short_args(args)})")
-            result = tools.dispatch(name, args)
+            # Spinner while the tool runs. Timeout picked from the tool
+            # type so the "Xs / Ys" progress on the spinner is honest.
+            _t_timeout = (tools.shell_timeout_sec if name == "run_shell"
+                          else tools.http_timeout_sec if name in
+                              ("http_get", "http_post")
+                          else 5)
+            with Spinner(f"{name} · {_short_args(args, 40)}",
+                         timeout_sec=_t_timeout):
+                result = tools.dispatch(name, args)
+            tool_call_total += 1
             sess.write("tool_result", name=name, result=result)
             print(f"[result] {result[:400]}"
                   + (" [...trunc]" if len(result) > 400 else ""))
@@ -687,29 +758,43 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
         # Bare URL / bare host → expand into an explicit checklist so a
         # small model doesn't call finish() after one request. Same list as
         # the SYSTEM_PROMPT persistence guidance but stated as an
-        # objective the model must complete.
+        # objective the model must complete. Every command has the actual
+        # hostname pre-substituted — the small models pass placeholder
+        # tokens like `<host>` literally otherwise.
         if _looks_like_target(objective) and " " not in objective.strip():
             t = objective.strip()
+            if t.startswith("http://") or t.startswith("https://"):
+                host = urlparse(t).hostname or t
+                url = t
+            else:
+                host = t.split("/", 1)[0].split(":", 1)[0]
+                url = f"https://{host}"
             objective = (
-                f"Recon {t}. Do all of the following before calling "
-                f"finish(): (1) http_get {t} and read the response headers "
-                f"(Server, X-Powered-By, Set-Cookie, X-Redirect-By, "
+                f"Recon {url}. Do all of the following before calling "
+                f"finish(): (1) http_get {url} and read the response "
+                f"headers (Server, X-Powered-By, Set-Cookie, X-Redirect-By, "
                 f"cf-ray, Location). (2) If the response is a 3xx, follow "
                 f"the Location header with another http_get. (3) Probe "
                 f"these paths in order and note which ones exist: "
-                f"/robots.txt, /sitemap.xml, /.well-known/security.txt, "
-                f"/.git/config, /.env, /server-status, /phpinfo.php, "
-                f"/wp-login.php, /wp-json/wp/v2/users, /api, /api/v1, "
-                f"/graphql, /swagger.json, /openapi.json. (4) If you "
-                f"detected WordPress in step (1) or (3), run "
-                f"'wpscan --url {t} --enumerate p,vp,vt --random-user-agent' "
-                f"via run_shell. (5) Run 'subfinder -d <host>' and "
-                f"'httpx -u <host> -status-code -title -tech-detect' via "
-                f"run_shell to widen the surface. (6) If steps 1-5 "
-                f"surfaced a version banner or a common stack, run one "
-                f"targeted 'nuclei -id <template> -u {t}'. Only THEN call "
-                f"finish() with a summary that lists the stack, the paths "
-                f"that returned interesting, and any suspected finding."
+                f"{url}/robots.txt, {url}/sitemap.xml, "
+                f"{url}/.well-known/security.txt, {url}/.git/config, "
+                f"{url}/.env, {url}/server-status, {url}/phpinfo.php, "
+                f"{url}/wp-login.php, {url}/wp-json/wp/v2/users, "
+                f"{url}/api, {url}/api/v1, {url}/graphql, "
+                f"{url}/swagger.json, {url}/openapi.json. (4) If you "
+                f"detected WordPress in step (1) or (3), run via "
+                f"run_shell: 'wpscan --url {url} --enumerate vp,vt "
+                f"--random-user-agent'. (5) Run via run_shell: "
+                f"'subfinder -d {host}' and 'httpx -u {url} "
+                f"-status-code -title -tech-detect' to widen the surface. "
+                f"(6) If steps 1-5 surfaced a version banner or a common "
+                f"stack, run one targeted 'nuclei -id <TEMPLATE_ID> -u "
+                f"{url}' via run_shell — pick a real template id "
+                f"(e.g. wordpress-detect, nginx-version, "
+                f"http-missing-security-headers) instead of the "
+                f"placeholder. Only THEN call finish() with a summary "
+                f"that lists the stack, the paths that returned "
+                f"interesting, and any suspected finding."
             )
         rc = run_one_shot(cfg, cli_args, state, objective)
         if rc == 130:
