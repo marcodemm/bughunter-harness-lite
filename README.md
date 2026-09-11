@@ -152,6 +152,20 @@ banner + `HELP_TEXT` and drops into a `>` prompt. **Each line you enter
 is a fresh one-shot** with that objective (a new session log, a fresh
 LLM conversation) — not a rolling chat.
 
+> **Note — the `>` prompt is NOT a shell.** Anything you type that
+> isn't a slash command (`/quit`, `/help`, `/run …`) or a sticky-flag
+> line (`--scope …`, `--header …`) is sent to the backend LLM as a
+> fresh objective. The model then decides what tool calls to make
+> against the target (constrained by the security gates below).
+>
+> **Example — ask the agent in natural language:**
+>
+> ```
+> > run wpscan against https://example.com with --enumerate vp -t 5 --disable-tls-checks --request-timeout 20 --connect-timeout 10 and report the plugins found
+> ```
+>
+> The LLM will (with luck) tool-call `run_shell({"command": "wpscan --url https://example.com ..."})` on its own turn. **The model may edit your command** (add/remove flags, tweak the URL), and it costs at least 2 LLM turns (one to decide the tool call, one to `finish()` with a summary). If you want the command executed **verbatim**, no model in the loop, use `/run` instead — see the slash-commands section below.
+
 Sticky flags carry across sessions in the same REPL. Set them once,
 they stay until you clear them with an empty value:
 
