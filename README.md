@@ -53,7 +53,7 @@ the prompt; the model cannot bypass them by asking nicely.
 | `http_post(url, body, content_type?)` | POST with attribution headers | Body is a string; JSON must be pre-serialized. |
 | `run_shell(command)` | Run one allowlisted CLI | First token must be one of `curl dig host whois httpx subfinder gau waybackurls nuclei ffuf wpscan`. Denylist blocks pipes, redirects, `sudo`, `rm`, destructive HTTP verbs. `nuclei` requires `-id <template>` (no `-tags cve` bulk runs). |
 | `oob_generate_token(purpose)` | Return a fresh OOB URL under your catcher host | The catcher host is `oob.host` in `config.yaml` — set it to YOUR OWN infrastructure, never a third-party service. |
-| `finish(summary)` | Stop the run cleanly | The REPL clears the flag after each user turn so a `finish()` in the previous turn doesn't lock you out of the next one. |
+| `finish(summary)` | Stop the run cleanly | Ends the current one-shot. In REPL, the next `>` line starts a fresh session so `finish()` doesn't block subsequent objectives. |
 
 **Explicitly not included** (and won't be — that's the whole point of
 `-lite`): `katana` (JS crawl too heavy on ARM chroot), `gowitness`
@@ -147,19 +147,55 @@ per event: LLM reply, tool call, tool result, kill switch, finish).
 python harness_lite.py --scope example.com
 ```
 
-Slash commands inside the REPL:
+Same UX as the desktop `bughunter-harness`: the harness prints the red
+banner + `HELP_TEXT` and drops into a `>` prompt. **Each line you enter
+is a fresh one-shot** with that objective (a new session log, a fresh
+LLM conversation) — not a rolling chat.
+
+Sticky flags carry across sessions in the same REPL. Set them once,
+they stay until you clear them with an empty value:
 
 ```
-/help                     show this
-/tools                    list available tools
-/scope [list|add HOST]    inspect or add to in-memory scope
-/save NAME                dump current messages to sessions/NAME.json
-/clear                    reset conversation (keeps scope + tools + session)
-/exit                     leave
+> --scope "*.example.com" --header "X-HackerOne-Researcher: yourhandle"
+[+] scope set (sticky): ['*.example.com']
+[+] header set (sticky): X-HackerOne-Researcher: yourhandle
+
+> Fingerprint https://www.example.com
+[+] Pre-flight: ALIVE · HTTP 200 from https://www.example.com
+[tool] http_get({"url": "https://www.example.com"})
+…
+[finish] Nginx 1.24 + WordPress 6.7.1 + Elementor Pro 3.20.0
+
+> https://api.example.com/v1/users
+─── Previous session ended ───
+New objective (or /quit / /bye to exit).
 ```
 
-Anything not starting with `/` is a user turn — the LLM sees it, may
-call tools, and prints the transcript inline.
+Slash commands (same as desktop harness):
+
+```
+/quit  /bye  /exit           leave the harness (or: quit / bye / exit)
+/help                        print HELP_TEXT again
+Ctrl+C                       cancel current session and exit
+```
+
+Sticky flags accepted inline in the prompt:
+
+```
+--scope PAT (repeatable)         in-scope allowlist
+--header "NAME: VALUE" (repeat)  custom HTTP header
+--skip-preflight                 skip probe for this session
+--strict-preflight               abort on probe failure
+--max-iterations N               override iter cap
+--max-wall-time-sec N            override wall-time cap
+--servertype S  --model M  --base-url URL       LLM backend overrides
+```
+
+Pass an empty value to clear a sticky: `--scope ""` · `--header ""`.
+
+A bare URL is treated as a recon objective (e.g. `https://www.example.com`
+becomes "Recon https://www.example.com — fingerprint tech and note
+anything obvious.").
 
 ## Pre-flight target reachability
 
@@ -190,9 +226,11 @@ fingerprint issue.
 ## Session limits (kill switches)
 
 - `limits.max_iterations` — one-shot cap (default 20).
-- `limits.max_iterations_per_repl_turn` — per user message in the REPL
-  (default 4). Keeps a runaway model from monopolizing your battery on
-  a single `>` prompt.
+- `limits.max_iterations_per_repl_turn` — legacy field, currently
+  ignored: each REPL objective spawns a fresh one-shot session that
+  uses `max_iterations` directly (same behavior as the desktop harness
+  REPL). Kept in the sample config only to document the historical
+  chat-style REPL that was removed in favor of one-shot-per-line.
 - `limits.max_wall_time_sec` — wall-clock cap (default 900 s / 15 min).
 - `limits.shell_timeout_sec` — per-command cap for `run_shell` (60 s).
 - `limits.http_timeout_sec` — per-request cap for `http_get` /
