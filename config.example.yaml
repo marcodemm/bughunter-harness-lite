@@ -19,7 +19,15 @@ llm:
 
   temperature: 0.1
   max_tokens: 1024
-  timeout_sec: 300              # HTTP timeout on the /chat/completions call
+  timeout_sec: 600              # HTTP timeout on the /chat/completions call.
+                                # 300s wasn't enough for the first turn of a
+                                # cold-loaded model on a mobile chroot
+                                # (Ollama loading a 3B GGUF + processing the
+                                # SYSTEM_PROMPT + 5 tool schemas can take
+                                # 3-5 min the very first time). 600s covers
+                                # cold starts on Kali NetHunter with
+                                # bughunter-v9; keeps subsequent turns
+                                # unaffected (they finish in seconds).
 
 # ─────────── Rate limit (global, enforced in code) ───────────────────
 # Every tool call (http_get / http_post / run_shell) blocks until this many
