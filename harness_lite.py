@@ -61,9 +61,13 @@ SESSIONS_DIR = ROOT / "sessions"
 QUIT_COMMANDS = {"/quit", "/bye", "/exit", "/q",
                  "quit", "bye", "exit"}
 HELP_COMMANDS = {"/help", "/?", "/h", "help", "?"}
+RUN_COMMANDS = {"/run", "/sh", "/shell"}
 
 REPL_COMMANDS_HINT = (
     "REPL commands:  /quit | /bye | /exit    /help\n"
+    "                /run <shell cmd>   run one allowlisted shell command\n"
+    "                                   directly (no LLM). scope+rate+redact\n"
+    "                                   gates still apply.\n"
     "Sticky flags:   --scope PAT (repeatable)  --header \"N: V\" (repeatable)\n"
     "                --skip-preflight  --strict-preflight  --no-report\n"
     "                --max-iterations N  --max-wall-time-sec N\n"
@@ -106,11 +110,21 @@ USAGE
 
 REPL COMMANDS
   After each session the harness prompts for a new objective:
-    <free text>         → start a new session with that objective
-    <bare URL>          → equivalent to "Recon <URL>"
-    /quit /bye /exit    → leave the harness (also: quit / bye / exit)
-    /help               → show this help again
-    Ctrl+C              → cancel current session and exit
+    <free text>              → start a new session with that objective
+    <bare URL>               → equivalent to "Recon <URL>"
+    /run <shell command>     → run one allowlisted shell command DIRECTLY,
+                                bypassing the LLM (aliases: /sh /shell).
+                                scope / rate / allowlist / denylist /
+                                redact / ANSI-strip / shell_timeout gates
+                                still apply. The command runs verbatim —
+                                no model interpretation. Its own session
+                                folder is created just like a normal run.
+                                Ideal for wpscan / nuclei -id / gau when
+                                you want the exact command executed and
+                                do not want to spend LLM turns on it.
+    /quit /bye /exit         → leave the harness (also: quit / bye / exit)
+    /help                    → show this help again
+    Ctrl+C                   → cancel current session and exit
 
   Sticky inline flags accepted in the prompt (persist across sessions):
     --scope PAT (repeatable)         in-scope allowlist
@@ -305,22 +319,22 @@ common paths BEFORE giving up:
 Per detected stack (look at Set-Cookie, X-Powered-By, X-Redirect-By,
 Server, meta generator in HTML):
 - WordPress  (X-Redirect-By: WordPress, /wp-*, wp-json):
-    ALWAYS first:
+    Fingerprint step:
         run_shell "nuclei -id wordpress-detect -u <full_url>"
-        (fingerprint in seconds; almost never fails).
+        (in seconds; almost never fails; enough to confirm WP).
     Then http_get /wp-login.php and /wp-json/wp/v2/users.
-    OPTIONALLY, if you still have budget:
-        run_shell "wpscan --url <full_url> --random-user-agent
-                  --disable-tls-checks -t 5 --request-timeout 20
-                  --connect-timeout 10"
-    (NO `--enumerate` on purpose — that keeps wpscan on its default
-     mode: detect WordPress, detect the version and the main theme,
-     stop. Finishes in ~30-60s and almost never times out.
-     If you want to enumerate vulnerable plugins, add
-     `--enumerate vp` — that takes 5-10 min on ARM and can time out,
-     so treat it as a MANUAL deep-scan, not an auto-checklist step.
-     Do NOT combine p and vp — wpscan rejects the mix.
-     Omit --api-token unless the operator has WPSCAN_API_TOKEN set.)
+    Do NOT auto-run wpscan. In empirical runs (`xagentai.net`, ~10
+    min), wpscan `--enumerate vp` timed out on 600s caps and even
+    the lightweight default mode (without `--enumerate`) hit the
+    600s cap on real WP installs. Wpscan is a DEEP scan, not a
+    fingerprint step — leave it to the operator, who dispatches it
+    manually via the REPL `/run` slash-command when they decide to
+    invest the 5-10 min it takes:
+        /run wpscan --url <URL> --enumerate vp -t 5
+                    --disable-tls-checks --request-timeout 20
+                    --connect-timeout 10
+    The `/run` command executes the shell directly (bypasses your
+    turn) so the operator gets a clean deep-scan session on demand.
 - Nginx / Apache banner in Server:
     run_shell "nuclei -id nginx-version -u URL" if you suspect a version;
     http_get /server-status  /nginx_status  /debug  /actuator/env
@@ -739,6 +753,13 @@ def prompt_for_objective(is_first: bool, reader) -> str | None:
               f"or paste the full URL.")
         return prompt_for_objective(is_first=is_first, reader=reader)
 
+    # /run <cmd> — direct shell dispatch, no LLM in the loop. Detected by
+    # the first token so we don't accidentally block a legitimate `/run …`
+    # on the unknown-command branch below.
+    first_tok = line.split(None, 1)[0].lower()
+    if first_tok in RUN_COMMANDS:
+        return line   # let run_repl route to run_direct_shell
+
     if line.startswith("/") and line.lower() not in QUIT_COMMANDS \
             and line.lower() not in HELP_COMMANDS:
         print(f"[!] Unknown REPL command '{line}'.")
@@ -820,6 +841,15 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
         if line is None:
             print("Goodbye!")
             return 0
+        # /run <cmd> path — direct shell dispatch, no LLM turn used.
+        first_tok = line.split(None, 1)[0].lower()
+        if first_tok in RUN_COMMANDS:
+            rest = line.split(None, 1)[1] if " " in line else ""
+            rc = run_direct_shell(cfg, cli_args, state, rest)
+            if rc == 130:
+                return 130
+            is_first = False
+            continue
         objective, flags = parse_repl_line(line)
         if flags:
             apply_sticky(state, flags)
@@ -867,17 +897,10 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
                 f"Also run 'subfinder -d {sf_host}' (apex domain, no "
                 f"www.) and 'httpx -u {url} -status-code -title "
                 f"-tech-detect' to widen the surface. "
-                f"(5) OPTIONAL VERSION CONFIRM — only if step (4) "
-                f"confirmed WordPress: run via run_shell 'wpscan "
-                f"--url {url} --random-user-agent --disable-tls-checks "
-                f"-t 5 --request-timeout 20 --connect-timeout 10' — "
-                f"no --enumerate flag on purpose so wpscan stays on its "
-                f"lightweight default (detect + version + theme, ~30s). "
-                f"If step (5) times out that is OK — you already have "
-                f"the fingerprint from step (4). Do NOT re-run wpscan "
-                f"with --enumerate vp here (that takes 5-10 min); the "
-                f"operator will run that manually if they want a deep "
-                f"scan. "
+                f"(5) Do NOT run wpscan here. Wpscan on a real WP "
+                f"install takes 5-10 min and consistently times out. "
+                f"The operator will dispatch it manually via `/run "
+                f"wpscan ...` from the REPL if they want a deep scan. "
                 f"(6) Only THEN call finish() with a summary that lists "
                 f"the stack (with version if known), the paths that "
                 f"returned interesting (skip 404s — those do not exist), "
@@ -887,6 +910,118 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
         if rc == 130:
             return 130  # Ctrl+C mid-session → exit REPL too
         is_first = False
+
+
+# ────────────────────────────────────────────────────────────────────────
+# /run <cmd> — direct shell dispatch (bypasses the LLM)
+# ────────────────────────────────────────────────────────────────────────
+def run_direct_shell(cfg: dict, cli_args: argparse.Namespace,
+                     state: dict, command: str) -> int:
+    """Dispatch a single `run_shell` tool call directly, bypassing the
+    LLM turn. Command still goes through every security gate — shell
+    allowlist, denylist, scope (with scope_enforcement policy), rate
+    limit, redact, ANSI strip, shell_timeout_sec — and lands in its own
+    session folder (sessions/<UTC>/session.jsonl + REPORT.md). Returns
+    0 on success, 130 on SIGINT.
+
+    Use case: the operator wants a specific shell command executed
+    verbatim, no model interpretation, no LLM turn cost. E.g.
+        /run wpscan --url https://target --enumerate vp -t 5
+        /run nuclei -id CVE-2024-1234 -u https://target
+        /run gau target.example.com
+    """
+    command = (command or "").strip()
+    if not command:
+        print("[!] /run needs a command. Example: "
+              "'/run wpscan --url https://target --enumerate vp -t 5'")
+        return 0
+
+    # Scope, backend, tools — same builders as run_one_shot (see below).
+    scope_patterns = (state.get("scope")
+                      or (list(cli_args.scope) if cli_args.scope else None))
+    scope = ScopeChecker(
+        scope_file=cli_args.scope_file if not scope_patterns else None,
+        patterns=scope_patterns if scope_patterns else None,
+    )
+    if not (scope.hosts or scope.wildcards or scope.networks):
+        print("[!] Empty scope. Add hosts to scope.txt or --scope. "
+              "Refusing to run.")
+        return 2
+
+    lim_cfg = cfg.get("limits") or {}
+    throttle_cfg = cfg.get("throttle") or {}
+    rate = RateLimiter(float(throttle_cfg.get("min_interval_sec", 1.0)))
+    attribution = dict(cfg.get("attribution_headers") or {})
+    attribution.update(state.get("headers") or {})
+    oob_cfg = cfg.get("oob") or {}
+    oob_host = str(oob_cfg.get("host") or "").strip()
+    oob_token_prefix = str(oob_cfg.get("token_prefix") or "lite").strip()
+    scope_mode = str(cfg.get("scope_enforcement") or "strict").lower()
+    tools = Tools(scope=scope, rate=rate,
+                  attribution_headers=attribution,
+                  oob_host=oob_host, oob_token_prefix=oob_token_prefix,
+                  shell_timeout_sec=int(lim_cfg.get("shell_timeout_sec", 60)),
+                  http_timeout_sec=int(lim_cfg.get("http_timeout_sec", 20)),
+                  scope_mode=scope_mode)
+
+    # Own session — makes the direct run inspectable later exactly like
+    # an agent-driven one.
+    llm_cfg = cfg.get("llm") or {}
+    sess = Session(SESSIONS_DIR,
+                   objective=f"/run {command}",
+                   config_snapshot={
+                       "backend": llm_cfg.get("servertype", "n/a (direct)"),
+                       "base_url": llm_cfg.get("base_url", "n/a"),
+                       "model": llm_cfg.get("model", "n/a"),
+                       "scope": {"hosts": sorted(scope.hosts),
+                                 "wildcards": scope.wildcards,
+                                 "networks": [str(n) for n in scope.networks]},
+                       "limits": lim_cfg, "throttle": throttle_cfg,
+                       "oob_host": oob_host,
+                       "oob_token_prefix": oob_token_prefix,
+                       "sticky": {k: v for k, v in state.items()
+                                  if k != "headers"},
+                       "direct_shell": True,
+                   })
+
+    def _on_sigint(_signum, _frame):
+        sess.write("sigint")
+        print("\n^C — closing session.")
+        try:
+            sess.close(iterations=0)
+        finally:
+            os._exit(130)
+    prev = signal.signal(signal.SIGINT, _on_sigint)
+    try:
+        print(f"[shell] {command}")
+        args = {"command": command}
+        sess.write("tool_call", name="run_shell", args=args)
+        with Spinner(f"run_shell · {command[:50]}",
+                     timeout_sec=tools.shell_timeout_sec):
+            result = tools.dispatch("run_shell", args)
+        sess.write("tool_result", name="run_shell", result=result)
+        print(f"[result] {result[:800]}"
+              + (" [...trunc]" if len(result) > 800 else ""))
+        # Treat the direct run as a completed session — record a synthetic
+        # 'finish' event with the tool result so REPORT.md has something
+        # for the Findings section.
+        sess.write("finish",
+                   summary=f"Direct shell run of `{command}`. Full output "
+                           f"in tool_result event above / REPORT.md.")
+        sess.close(iterations=1)
+        if not (state.get("no_report") or getattr(cli_args, "no_report", False)):
+            try:
+                rp = write_report(sess.path)
+                print(f"[report] {rp}")
+            except Exception as e:
+                print(f"[report] failed: {type(e).__name__}: {e}")
+        return 0
+    except Exception as e:
+        sess.write("kill", reason=f"unhandled: {type(e).__name__}: {e}")
+        sess.close(iterations=0)
+        raise
+    finally:
+        signal.signal(signal.SIGINT, prev)
 
 
 # ────────────────────────────────────────────────────────────────────────

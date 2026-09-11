@@ -171,13 +171,46 @@ they stay until you clear them with an empty value:
 New objective (or /quit / /bye to exit).
 ```
 
-Slash commands (same as desktop harness):
+Slash commands:
 
 ```
 /quit  /bye  /exit           leave the harness (or: quit / bye / exit)
 /help                        print HELP_TEXT again
+/run <shell command>         run one allowlisted shell command DIRECTLY,
+                             bypassing the LLM. Aliases: /sh, /shell.
 Ctrl+C                       cancel current session and exit
 ```
+
+`/run` (and its aliases `/sh` / `/shell`) executes ONE allowlisted shell
+command verbatim, without spending an LLM turn on it. Every security
+gate still applies: shell allowlist (`curl dig host whois httpx
+subfinder gau waybackurls nuclei ffuf wpscan`), the denylist for pipes /
+redirects / sudo / etc., the scope check (with the `scope_enforcement`
+policy — strict / warn / off), the rate limit, the secret redactor, the
+ANSI-strip and the `shell_timeout_sec` cap. Each `/run` creates its own
+session folder just like a normal REPL objective, so the output ends up
+in a fresh `sessions/<UTC>/session.jsonl` + `REPORT.md` pair.
+
+Example — dispatch a deep `wpscan` on demand without spending LLM turns
+on the tool-call decision:
+
+```
+> --scope www.example.com
+> https://www.example.com                              # auto-recon (< 60s)
+[…finish + REPORT.md…]
+
+> /run wpscan --url https://www.example.com --enumerate vp -t 5 --disable-tls-checks --request-timeout 20 --connect-timeout 10
+[shell] wpscan --url https://www.example.com --enumerate vp -t 5 …
+  ⠋ run_shell · wpscan --url https://www.example.com --enumerate v… · 47s / 600s
+[result] [exit=0] Interesting Finding(s): …
+[report] sessions/YYYYMMDDTHHMMSSZ/REPORT.md
+```
+
+Compare with the indirect route (typing the same intent in natural
+language): the LLM sees the objective, tool-calls `run_shell` with
+whatever command it thinks best (possibly editing yours), then likely
+calls `finish()` with its own summary — 2+ LLM turns and no guarantee
+the command runs verbatim. `/run` skips all of that.
 
 Sticky flags accepted inline in the prompt:
 
