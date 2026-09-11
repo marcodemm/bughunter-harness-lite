@@ -47,6 +47,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from llm import LLMClient, resolve_backend
 from progress import Spinner
 from redact import redact
+from report import write_report
 from scope import ScopeChecker
 from session import Session
 from throttle import RateLimiter
@@ -64,7 +65,7 @@ HELP_COMMANDS = {"/help", "/?", "/h", "help", "?"}
 REPL_COMMANDS_HINT = (
     "REPL commands:  /quit | /bye | /exit    /help\n"
     "Sticky flags:   --scope PAT (repeatable)  --header \"N: V\" (repeatable)\n"
-    "                --skip-preflight  --strict-preflight\n"
+    "                --skip-preflight  --strict-preflight  --no-report\n"
     "                --max-iterations N  --max-wall-time-sec N\n"
     "                --servertype S  --model M  --base-url URL\n"
     "Objective:      any other text = start a new one-shot with that goal."
@@ -93,6 +94,9 @@ USAGE
   python harness_lite.py --strict-preflight       → abort on preflight failure
   python harness_lite.py --max-iterations N       → override cap (default 20)
   python harness_lite.py --max-wall-time-sec N    → override cap (default 900)
+  python harness_lite.py --no-report              → do NOT write REPORT.md
+                                                     (default: report IS
+                                                      written next to JSONL)
   python harness_lite.py --help                   → show this help
 
   Flags can combine, e.g.
@@ -113,6 +117,7 @@ REPL COMMANDS
     --header "NAME: VALUE" (repeat)  custom HTTP header
     --skip-preflight                 skip probe for this run
     --strict-preflight               abort on probe failure
+    --no-report                      skip REPORT.md for the following runs
     --max-iterations N               override iter cap
     --max-wall-time-sec N            override wall-time cap
     --servertype {auto,lmstudio,ollama,llamacpp,openai,anthropic,nvidia,gemini}
@@ -197,6 +202,12 @@ SESSIONS
 
   Location:  <harness-dir>/sessions/YYYYMMDDTHHMMSSZ.jsonl
   (dir auto-created; one file per one-shot / per REPL objective)
+
+  Alongside each JSONL a REPORT.md is written with the same base name:
+    <harness-dir>/sessions/YYYYMMDDTHHMMSSZ.md
+  containing the header (backend + scope + timings), a tool-call
+  timeline table, any free-text the LLM produced between tool calls,
+  and the finish() summary as findings. Pass --no-report to skip it.
 
   Review after every engagement to audit what the agent tried.
 ════════════════════════════════════════════════════════════════════
@@ -551,6 +562,7 @@ def _short_args(args: dict, max_len: int = 120) -> str:
 _STICKY_FLAGS = {
     "--scope", "--header",
     "--skip-preflight", "--strict-preflight",
+    "--no-report",
     "--max-iterations", "--max-wall-time-sec",
     "--servertype", "--model", "--base-url",
     "--config", "--scope-file",
@@ -581,6 +593,9 @@ def parse_repl_line(line: str) -> tuple[str, dict[str, Any]]:
             i += 1; continue
         if t in ("--strict-preflight",):
             flags["strict_preflight"] = True
+            i += 1; continue
+        if t in ("--no-report",):
+            flags["no_report"] = True
             i += 1; continue
         if t == "--max-iterations" and i + 1 < len(parts):
             try:
@@ -750,6 +765,9 @@ def apply_sticky(state: dict, flags: dict) -> None:
     if "strict_preflight" in flags:
         state["strict_preflight"] = True
         print("[+] strict_preflight = True (sticky).")
+    if "no_report" in flags:
+        state["no_report"] = True
+        print("[+] no_report = True (sticky) — REPORT.md will NOT be written.")
     for k in ("max_iterations", "max_wall_time_sec"):
         if k in flags:
             state[k] = flags[k]
@@ -770,6 +788,7 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
         "headers": {},
         "skip_preflight": cli_args.skip_preflight,
         "strict_preflight": cli_args.strict_preflight,
+        "no_report": cli_args.no_report,
         "max_iterations": cli_args.max_iterations,
         "max_wall_time_sec": cli_args.max_wall_time_sec,
     }
@@ -942,6 +961,15 @@ def run_one_shot(cfg: dict, cli_args: argparse.Namespace,
             max_tokens=int(llm_cfg.get("max_tokens", 1024)),
         )
         sess.close(iterations=iters)
+        # REPORT.md next to the JSONL — one per one-shot session (in
+        # REPL mode you get one per objective). Set --no-report on the
+        # CLI or as a REPL sticky to skip.
+        if not (state.get("no_report") or getattr(cli_args, "no_report", False)):
+            try:
+                rp = write_report(sess.path)
+                print(f"[report] {rp}")
+            except Exception as e:
+                print(f"[report] failed: {type(e).__name__}: {e}")
         return 0
     except Exception as e:
         sess.write("kill", reason=f"unhandled: {type(e).__name__}: {e}")
@@ -994,6 +1022,9 @@ def parse_args() -> argparse.Namespace:
                    help="Override config.limits.max_iterations.")
     p.add_argument("--max-wall-time-sec", type=int, default=0,
                    help="Override config.limits.max_wall_time_sec.")
+    p.add_argument("--no-report", action="store_true",
+                   help="Skip the REPORT.md that is written next to the "
+                        "session JSONL. Default: report IS written.")
     return p.parse_args()
 
 
@@ -1039,6 +1070,7 @@ def main() -> int:
             "headers": {},
             "skip_preflight": args.skip_preflight,
             "strict_preflight": args.strict_preflight,
+            "no_report": args.no_report,
             "max_iterations": args.max_iterations,
             "max_wall_time_sec": args.max_wall_time_sec,
         }

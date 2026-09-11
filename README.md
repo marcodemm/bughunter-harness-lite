@@ -279,6 +279,56 @@ line, in order:
 Useful to review what the agent did, reproduce a hit, or hand context
 to the desktop harness for a full run.
 
+### REPORT.md (Markdown session report)
+
+Alongside every JSONL, a `REPORT.md` with the same base name is written
+by [`report.py`](report.py). One report per one-shot session — in REPL
+mode, where each accepted line spawns a fresh session, each objective
+produces its own JSONL **and** its own REPORT.md:
+
+```
+sessions/
+├── 20260911T180000Z.jsonl     ← raw event log
+├── 20260911T180000Z.md        ← Markdown report (same base name)
+├── 20260911T181245Z.jsonl     ← next REPL objective
+└── 20260911T181245Z.md
+```
+
+The report contains:
+
+- **Header** — session log filename, objective, backend + model, base URL,
+  scope (hosts / wildcards / networks), OOB host + prefix, start / end
+  timestamps, elapsed wall time, iterations, tool-call count, outcome
+  (`finish` / `kill` / `sigint` / `incomplete`).
+- **Tool calls (timeline)** — one Markdown table row per call: index,
+  tool name, args (truncated), result (first 120 chars, redacted).
+- **Assistant narrative** — any free-text the LLM produced between tool
+  calls (empty when the model spoke only through tool calls, which is
+  common with small models).
+- **Findings** — the `finish()` summary if the session ended cleanly;
+  otherwise the kill reason or "session interrupted with Ctrl+C".
+- **Footer** — pointer back to the JSONL and its event count.
+
+**Skip the report per run**: pass `--no-report` on the CLI, or as a
+sticky flag in the REPL — for that REPL, subsequent sessions do not
+write REPORT.md until you clear it (there is no "un-set" today; restart
+the REPL to reset the sticky).
+
+```bash
+# one-shot without report
+python harness_lite.py --no-report --scope example.com --objective "..."
+
+# REPL: set the sticky once, no reports for the rest of the REPL
+python harness_lite.py --scope example.com
+> --no-report
+[+] no_report = True (sticky) — REPORT.md will NOT be written.
+> Fingerprint https://www.example.com
+```
+
+The JSONL is always written — `--no-report` only skips the Markdown
+render step; the raw log stays available for later analysis or for
+piping into the desktop harness.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
