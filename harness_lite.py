@@ -271,16 +271,22 @@ common paths BEFORE giving up:
 Per detected stack (look at Set-Cookie, X-Powered-By, X-Redirect-By,
 Server, meta generator in HTML):
 - WordPress  (X-Redirect-By: WordPress, /wp-*, wp-json):
-    http_get /wp-login.php, /wp-json/wp/v2/users,
-    run_shell "wpscan --url <full_url> --enumerate vp --random-user-agent
-              --disable-tls-checks -t 5"
+    ALWAYS first:
+        run_shell "nuclei -id wordpress-detect -u <full_url>"
+        (fingerprint in seconds; almost never fails).
+    Then http_get /wp-login.php and /wp-json/wp/v2/users.
+    OPTIONALLY, if you still have budget:
+        run_shell "wpscan --url <full_url> --enumerate vp
+                  --random-user-agent --disable-tls-checks -t 5
+                  --request-timeout 20 --connect-timeout 10"
     (--enumerate vp = vulnerable plugins ONLY, fastest useful mode.
      Do NOT combine p and vp — wpscan rejects the mix.
-     -t 5 caps threads so it finishes in a couple of minutes on ARM.
-     Omit --api-token unless the operator has WPSCAN_API_TOKEN set.
-     If wpscan still times out, fall back to
-     run_shell "nuclei -id wordpress-detect -u <full_url>" — cheap,
-     always finishes in seconds.)
+     -t 5 caps threads; --request-timeout/--connect-timeout cap the
+     wait per HTTP request so wpscan cannot hang forever on a slow
+     endpoint. Full wpscan still can take 5-10 min on ARM chroot —
+     if you are running short on iterations skip it and rely on the
+     nuclei fingerprint above.
+     Omit --api-token unless the operator has WPSCAN_API_TOKEN set.)
 - Nginx / Apache banner in Server:
     run_shell "nuclei -id nginx-version -u URL" if you suspect a version;
     http_get /server-status  /nginx_status  /debug  /actuator/env
@@ -805,23 +811,26 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
                 f"{url}/.env, {url}/server-status, {url}/phpinfo.php, "
                 f"{url}/wp-login.php, {url}/wp-json/wp/v2/users, "
                 f"{url}/api, {url}/api/v1, {url}/graphql, "
-                f"{url}/swagger.json, {url}/openapi.json. (4) If you "
-                f"detected WordPress in step (1) or (3), run via "
-                f"run_shell: 'wpscan --url {url} --enumerate vp "
-                f"--random-user-agent --disable-tls-checks -t 5' — if it "
-                f"times out or errors, fall back to "
-                f"'nuclei -id wordpress-detect -u {url}' (cheap, always "
-                f"finishes in seconds). (5) Run via run_shell: "
-                f"'subfinder -d {host}' and 'httpx -u {url} "
-                f"-status-code -title -tech-detect' to widen the surface. "
-                f"(6) If steps 1-5 surfaced a version banner or a common "
-                f"stack, run one targeted 'nuclei -id <TEMPLATE_ID> -u "
-                f"{url}' via run_shell — pick a real template id "
-                f"(e.g. wordpress-detect, nginx-version, "
-                f"http-missing-security-headers) instead of the "
-                f"placeholder. Only THEN call finish() with a summary "
-                f"that lists the stack, the paths that returned "
-                f"interesting, and any suspected finding."
+                f"{url}/swagger.json, {url}/openapi.json. "
+                f"(4) FINGERPRINT — always cheap, run via run_shell: "
+                f"'nuclei -id wordpress-detect -u {url}'. If the "
+                f"detection says nginx/apache instead, retry with "
+                f"'nuclei -id nginx-version -u {url}' or "
+                f"'nuclei -id http-missing-security-headers -u {url}'. "
+                f"Also run 'subfinder -d {host}' and "
+                f"'httpx -u {url} -status-code -title -tech-detect' to "
+                f"widen the surface. "
+                f"(5) OPTIONAL DEEP SCAN — only if you still have iters "
+                f"and time budget AND step (4) confirmed WordPress: run "
+                f"via run_shell 'wpscan --url {url} --enumerate vp "
+                f"--random-user-agent --disable-tls-checks -t 5 "
+                f"--request-timeout 20 --connect-timeout 10'. WPScan "
+                f"can take 5-10 min; if it times out that is OK — you "
+                f"already have the WordPress fingerprint from step (4). "
+                f"(6) Only THEN call finish() with a summary that lists "
+                f"the stack (with version if known), the paths that "
+                f"returned interesting (skip 404s — those do not exist), "
+                f"and any suspected finding."
             )
         rc = run_one_shot(cfg, cli_args, state, objective)
         if rc == 130:

@@ -299,7 +299,35 @@ class Tools:
         return "OK — session finished."
 
     # ── helpers ───────────────────────────────────────────────────────
+    # HTTP headers worth keeping on a 404 short-circuit — they're the only
+    # ones a fingerprint can lean on, and they're usually identical to what
+    # the root already exposed, so keeping just these three is enough.
+    _404_FINGERPRINT_HEADERS = ("Server", "X-Powered-By", "Content-Type")
+
     def _format_http(self, r: requests.Response) -> str:
+        # Short-circuit 404 responses: small models tend to read every
+        # non-200 as "exists", which then bloats the finish() summary
+        # with false positives ("Robot files, security.txt, phpinfo.php,
+        # git config, .env, phpinfo.php all exist"). A 404 body is
+        # almost always the generic error page of the stack (WP theme
+        # 404, Apache default), never useful signal — dropping it also
+        # saves 500-2000 tokens of context per probe, which matters on
+        # a 3B model with num_ctx=4096.
+        if r.status_code == 404:
+            kept = "\n".join(
+                f"{k}: {v}" for k, v in r.headers.items()
+                if k in self._404_FINGERPRINT_HEADERS
+            )
+            rendered = (
+                f"HTTP 404 Not Found\n"
+                f"URL: {r.url}\n"
+                f"--- headers (fingerprint only) ---\n{kept}\n"
+                f"--- note ---\n"
+                f"Path does not exist on this server. "
+                f"DO NOT list it in the finish() summary as an existing "
+                f"path or finding. Move on to the next probe."
+            )
+            return redact(rendered)
         MAX_BODY = 3000
         body = r.text or ""
         if len(body) > MAX_BODY:
