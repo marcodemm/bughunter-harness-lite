@@ -1,5 +1,7 @@
 # bughunter-harness-lite
 
+![Bughunter Harness Lite — startup banner](images/bughunter-harness-lite.png)
+
 Mobile-first, single-process, agent-loop LLM pentest harness. Designed
 to run inside a Termux + Kali NetHunter chroot on Android with **Ollama**
 serving a small model (a 3B fine-tune fits an 8 GB phone comfortably),
