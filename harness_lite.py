@@ -32,7 +32,15 @@ from pathlib import Path
 from typing import Any
 
 import requests
+import urllib3
 import yaml
+
+# We intentionally do HTTP requests with verify=False (bug-bounty targets
+# often have self-signed / broken chains and the finding is about the
+# content, not the cert). Silence the InsecureRequestWarning so the REPL
+# output stays readable — the raw HTTP status/headers already tell the
+# operator whether TLS matters.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Local modules
 from llm import LLMClient, resolve_backend
@@ -192,12 +200,14 @@ SESSIONS
 ════════════════════════════════════════════════════════════════════
 """
 
-# Small system prompt: on a 3B model with num_ctx=4096 we spend the budget
-# on tool results, not on scaffolding.
+# SYSTEM_PROMPT tuned for small models (3B–8B). Small models tend to call
+# finish() after 1–2 tool calls; the operator wants MORE persistence than
+# that, so the prompt spells out an explicit minimum + concrete next-step
+# recipes per detected stack.
 SYSTEM_PROMPT = """You are a bug-bounty assistant running on the operator's mobile device.
 You have a small toolbox: http_get, http_post, run_shell, oob_generate_token, finish.
 
-Rules that are enforced in code (you cannot bypass them):
+Rules ENFORCED IN CODE (you cannot bypass them, do not try):
 - Every URL host must be in the operator's scope allowlist.
 - A minimum interval between tool calls is enforced (rate limit).
 - run_shell only accepts: curl, dig, host, whois, httpx, subfinder, gau,
@@ -205,11 +215,61 @@ Rules that are enforced in code (you cannot bypass them):
 - No pipes, redirects, sudo, rm, or destructive HTTP verbs.
 - Tool output is redacted for secrets before you see it.
 
-Practical guidance:
-- Prefer http_get + a single nuclei -id when you already suspect a CVE.
-- Prefer subfinder + httpx over katana (crawlers are excluded here).
-- One request per turn is fine — the operator is on a phone, not a server.
-- Call finish(summary) as soon as you have a result. Do not keep looping.
+━━━ PERSISTENCE RULES (this is the important part) ━━━
+
+DO NOT call finish() after 1 or 2 tool calls. A useful run needs AT LEAST
+4-6 tool calls that actually explore the target. Call finish() only when
+you have hit AT LEAST ONE of:
+  (a) 6+ tool calls executed AND you have a concrete finding OR a real
+      dead-end that you can justify in the summary; OR
+  (b) 12+ tool calls executed (any state — the operator will decide); OR
+  (c) You explicitly detected a vulnerability with a PoC that reproduces.
+
+If the response is an HTTP 3xx redirect: read the `Location:` header and
+follow it with another http_get. Do NOT stop at the redirect body.
+
+If the response body is empty or short: that alone is NOT a result. Try
+common paths BEFORE giving up:
+  /robots.txt   /sitemap.xml   /.well-known/security.txt   /humans.txt
+  /.git/config  /.env          /backup.zip  /.svn/entries
+  /server-status  /phpinfo.php  /info.php
+
+Per detected stack (look at Set-Cookie, X-Powered-By, X-Redirect-By,
+Server, meta generator in HTML):
+- WordPress  (X-Redirect-By: WordPress, /wp-*, wp-json):
+    http_get /wp-login.php, /wp-json/wp/v2/users,
+    run_shell "wpscan --url URL --enumerate p,vp,vt --api-token X --random-user-agent"
+    (skip --api-token if the operator has not configured wpscan).
+- Nginx / Apache banner in Server:
+    run_shell "nuclei -id nginx-version -u URL" if you suspect a version;
+    http_get /server-status  /nginx_status  /debug  /actuator/env
+- PHP  (X-Powered-By: PHP, .php in URL):
+    http_get /phpinfo.php /info.php /test.php /shell.php /adminer.php
+- Cloudflare  (Server: cloudflare, cf-ray header):
+    http_get /cdn-cgi/trace  — sometimes leaks origin IP hints.
+- Any REST/JSON API:
+    http_get /api /api/v1 /swagger.json /openapi.json /graphql
+    /api/users /api/health /api/status.
+
+subfinder / gau / waybackurls / httpx: use them liberally on a bare host
+to widen the surface — they are cheap and give you a lot of context.
+
+nuclei: only with -id <template>. Good templates to try when you already
+suspect a stack (each is one call, cheap):
+  http-missing-security-headers  ssl-dns-names  cors-misconfig
+  dns-saas-service-detection  wordpress-detect  aws-bucket-takeover
+
+━━━ finish() summary format ━━━
+
+When you finally call finish(summary=...), the summary MUST include:
+  - The stack you fingerprinted (with version if possible).
+  - The paths you probed (mention the ones that returned interesting).
+  - Any credential/token you saw (with the last 4 chars redacted,
+    e.g. "PHPSESSID cookie present (…ab12)").
+  - Any suspected finding + how to reproduce it in one line.
+  - If truly nothing was found, list WHAT you tried so the operator can
+    decide the next angle. "No obvious fingerprints" alone is a bad
+    summary — do not use that.
 """
 
 
@@ -624,9 +684,33 @@ def run_repl(cfg: dict, cli_args: argparse.Namespace) -> int:
             # Only-flags line: refresh state, no session
             is_first = False
             continue
-        # Bare URL → treat as recon objective for readability in the log
+        # Bare URL / bare host → expand into an explicit checklist so a
+        # small model doesn't call finish() after one request. Same list as
+        # the SYSTEM_PROMPT persistence guidance but stated as an
+        # objective the model must complete.
         if _looks_like_target(objective) and " " not in objective.strip():
-            objective = f"Recon {objective.strip()} — fingerprint tech and note anything obvious."
+            t = objective.strip()
+            objective = (
+                f"Recon {t}. Do all of the following before calling "
+                f"finish(): (1) http_get {t} and read the response headers "
+                f"(Server, X-Powered-By, Set-Cookie, X-Redirect-By, "
+                f"cf-ray, Location). (2) If the response is a 3xx, follow "
+                f"the Location header with another http_get. (3) Probe "
+                f"these paths in order and note which ones exist: "
+                f"/robots.txt, /sitemap.xml, /.well-known/security.txt, "
+                f"/.git/config, /.env, /server-status, /phpinfo.php, "
+                f"/wp-login.php, /wp-json/wp/v2/users, /api, /api/v1, "
+                f"/graphql, /swagger.json, /openapi.json. (4) If you "
+                f"detected WordPress in step (1) or (3), run "
+                f"'wpscan --url {t} --enumerate p,vp,vt --random-user-agent' "
+                f"via run_shell. (5) Run 'subfinder -d <host>' and "
+                f"'httpx -u <host> -status-code -title -tech-detect' via "
+                f"run_shell to widen the surface. (6) If steps 1-5 "
+                f"surfaced a version banner or a common stack, run one "
+                f"targeted 'nuclei -id <template> -u {t}'. Only THEN call "
+                f"finish() with a summary that lists the stack, the paths "
+                f"that returned interesting, and any suspected finding."
+            )
         rc = run_one_shot(cfg, cli_args, state, objective)
         if rc == 130:
             return 130  # Ctrl+C mid-session → exit REPL too
