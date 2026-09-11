@@ -172,13 +172,25 @@ LLM conversation) — not a rolling chat.
 > fresh objective. The model then decides what tool calls to make
 > against the target (constrained by the security gates below).
 >
-> **Example — ask the agent in natural language:**
+> **Examples — ask the agent in natural language:**
 >
 > ```
 > > run wpscan against https://example.com with --enumerate vp -t 5 --disable-tls-checks --request-timeout 20 --connect-timeout 10 and report the plugins found
 > ```
 >
-> The LLM will (with luck) tool-call `run_shell({"command": "wpscan --url https://example.com ..."})` on its own turn. **The model may edit your command** (add/remove flags, tweak the URL), and it costs at least 2 LLM turns (one to decide the tool call, one to `finish()` with a summary). If you want the command executed **verbatim**, no model in the loop, use `/run` instead — see the slash-commands section below.
+> ```
+> > check if https://www.example.com exposes any of /.env, /.git/config, /backup.zip or /wp-config.php.bak
+> ```
+>
+> ```
+> > enumerate subdomains of example.com with subfinder and then run httpx against the top 5 live hosts to see title and tech
+> ```
+>
+> ```
+> > whois example.com, resolve A and CNAME records for www.example.com, and finish by running nuclei -id http-missing-security-headers against https://www.example.com
+> ```
+>
+> On each of these the LLM will (with luck) chain the corresponding tool calls on its own turn (`run_shell`, `http_get`, etc.). **The model may edit your command** (add/remove flags, tweak the URL), and every objective costs at least 2 LLM turns (one to decide the tool calls, one to `finish()` with a summary). If you want a command executed **verbatim**, no model in the loop, use `/run` instead — see the slash-commands section below.
 
 Sticky flags carry across sessions in the same REPL. Set them once,
 they stay until you clear them with an empty value:
