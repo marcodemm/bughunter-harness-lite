@@ -1,6 +1,12 @@
 """JSONL session logger. One line per event.
 
-Events:
+Directory layout (one folder per one-shot session):
+  <sessions_root>/<UTC-timestamp>/
+      session.jsonl            ← this log
+      REPORT.md                ← written by report.py after the run
+      (future: screenshots/, artifacts/, ...)
+
+Events written to session.jsonl:
   {"t": "meta",       "objective": "...", "config": {...}}   session start
   {"t": "llm_reply",  "content": "...", "tool_calls": [...]}  each model turn
   {"t": "tool_call",  "name": "...", "args": {...}}           before dispatch
@@ -21,10 +27,17 @@ from typing import Any
 class Session:
     def __init__(self, sessions_dir: str | Path,
                  objective: str, config_snapshot: dict[str, Any]):
-        self.dir = Path(sessions_dir)
-        self.dir.mkdir(parents=True, exist_ok=True)
+        # sessions_dir is the ROOT (e.g. <harness>/sessions/). Each session
+        # gets its own subfolder <UTC-timestamp>/ so REPORT.md and any
+        # future per-session artifacts sit next to session.jsonl without
+        # polluting the root — matches the desktop bughunter-harness layout
+        # (sessions/<run-id>/…).
+        self.root = Path(sessions_dir)
+        self.root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.path = self.dir / f"{stamp}.jsonl"
+        self.dir = self.root / stamp
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.path = self.dir / "session.jsonl"
         self.start_ts = datetime.now(timezone.utc)
         self._fp = open(self.path, "w", encoding="utf-8", buffering=1)
         self.write("meta", objective=objective, config=config_snapshot)

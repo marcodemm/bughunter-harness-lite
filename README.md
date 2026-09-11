@@ -264,8 +264,22 @@ harness there — read the program policy first.
 
 ## Sessions
 
-Every run writes `sessions/<UTC-timestamp>.jsonl`. One JSON object per
-line, in order:
+Each one-shot session gets its own folder under `sessions/`, matching
+the desktop `bughunter-harness` layout. In REPL mode, where every
+accepted line spawns a fresh session, each objective produces its own
+folder:
+
+```
+sessions/
+├── 20260911T180000Z/
+│   ├── session.jsonl          ← raw event log
+│   └── REPORT.md              ← Markdown report
+└── 20260911T181245Z/          ← next REPL objective
+    ├── session.jsonl
+    └── REPORT.md
+```
+
+`session.jsonl` is one JSON object per line, in order:
 
 - `meta`      — objective, backend, model, scope snapshot, config caps.
 - `llm_reply` — assistant content + tool_calls.
@@ -281,18 +295,8 @@ to the desktop harness for a full run.
 
 ### REPORT.md (Markdown session report)
 
-Alongside every JSONL, a `REPORT.md` with the same base name is written
-by [`report.py`](report.py). One report per one-shot session — in REPL
-mode, where each accepted line spawns a fresh session, each objective
-produces its own JSONL **and** its own REPORT.md:
-
-```
-sessions/
-├── 20260911T180000Z.jsonl     ← raw event log
-├── 20260911T180000Z.md        ← Markdown report (same base name)
-├── 20260911T181245Z.jsonl     ← next REPL objective
-└── 20260911T181245Z.md
-```
+`REPORT.md` sits next to `session.jsonl` in the same folder, written by
+[`report.py`](report.py) after the run finishes.
 
 The report contains:
 

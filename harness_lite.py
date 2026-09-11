@@ -194,20 +194,32 @@ SECURITY GATES  (enforced in code — model cannot bypass them)
                         http_timeout_sec.  Ctrl+C is always honored.
 
 SESSIONS
-  Every run writes a JSONL log of the whole conversation:
-    - objective + config snapshot
-    - LLM responses (content + tool_calls)
-    - redacted result of each tool call
-    - kill switch / sigint / finish, if any
+  One folder per one-shot session, matching the desktop harness layout:
 
-  Location:  <harness-dir>/sessions/YYYYMMDDTHHMMSSZ.jsonl
-  (dir auto-created; one file per one-shot / per REPL objective)
+    <harness-dir>/sessions/YYYYMMDDTHHMMSSZ/
+        session.jsonl        raw event log (see below)
+        REPORT.md            Markdown report (see below)
+        (future artifacts sit in the same folder)
 
-  Alongside each JSONL a REPORT.md is written with the same base name:
-    <harness-dir>/sessions/YYYYMMDDTHHMMSSZ.md
-  containing the header (backend + scope + timings), a tool-call
-  timeline table, any free-text the LLM produced between tool calls,
-  and the finish() summary as findings. Pass --no-report to skip it.
+  session.jsonl — one JSON object per line, in order:
+    - meta        objective + config snapshot
+    - llm_reply   assistant content + tool_calls, every turn
+    - tool_call   name + args (JSON) before dispatch
+    - tool_result string returned by the tool (already redacted)
+    - kill        kill switch fired (max iters / wall / LLM error)
+    - sigint      Ctrl+C
+    - finish      finish() called by the model
+    - end         iterations + elapsed_sec
+
+  REPORT.md — rendered from session.jsonl after the run:
+    - Header (backend + scope + timings + outcome)
+    - Tool calls (timeline table)
+    - Assistant narrative (free-text turns, if any)
+    - Findings (the finish() summary or the kill reason)
+    - Pointer back to session.jsonl
+
+  Pass --no-report to skip the REPORT.md step (session.jsonl is
+  always written). In REPL mode --no-report is sticky.
 
   Review after every engagement to audit what the agent tried.
 ════════════════════════════════════════════════════════════════════

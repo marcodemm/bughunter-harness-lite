@@ -1,9 +1,10 @@
 """Session JSONL → REPORT.md.
 
 Consumes the JSONL log written by session.py and produces a human-readable
-Markdown report next to it (same base name, `.md` extension). One report
-per one-shot session — in REPL mode where each accepted line spawns a
-fresh session, each objective produces its own JSONL + its own REPORT.md.
+Markdown report in the same session folder (sessions/<UTC>/REPORT.md).
+One report per one-shot session — in REPL mode where each accepted line
+spawns a fresh session folder, each objective produces its own
+session.jsonl + REPORT.md pair under its own folder.
 
 The report is best-effort: any failure while reading or rendering the
 log falls through to a stub with the error message. Never raises to the
@@ -17,13 +18,14 @@ from typing import Any
 
 
 def write_report(session_jsonl: Path | str) -> Path:
-    """Read a session JSONL and write its Markdown counterpart alongside.
+    """Read a session JSONL and write REPORT.md in the same folder.
     Returns the path to the report file."""
     path = Path(session_jsonl)
-    report_path = path.with_suffix(".md")
+    report_path = path.parent / "REPORT.md"
     try:
         events = _load(path)
-        md = _render(events, session_name=path.name)
+        md = _render(events, session_name=path.name,
+                     session_id=path.parent.name)
     except Exception as e:
         md = (f"# Bughunter Harness Lite — Session Report\n\n"
               f"Failed to build the report from `{path.name}`: "
@@ -66,7 +68,8 @@ def _md_cell(s: str) -> str:
     return s.replace("|", "\\|")
 
 
-def _render(events: list[dict], session_name: str) -> str:
+def _render(events: list[dict], session_name: str,
+            session_id: str = "") -> str:
     meta = _last(events, "meta") or {}
     end = _last(events, "end") or {}
     finish = _last(events, "finish") or {}
@@ -104,7 +107,10 @@ def _render(events: list[dict], session_name: str) -> str:
     lines.append("")
 
     # Header block
-    lines.append(f"- **Session log**: `{session_name}`")
+    if session_id:
+        lines.append(f"- **Session ID**: `{session_id}`")
+    lines.append(f"- **Session log**: `{session_name}` "
+                 f"(in the same folder as this report)")
     lines.append(f"- **Objective**: {_short(objective, 400)}")
     lines.append(f"- **Backend**: {cfg.get('backend', '?')} · "
                  f"model `{cfg.get('model', '?')}`")
