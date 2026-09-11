@@ -1,6 +1,6 @@
-"""Startup banner — ASCII art of BUGHUNTER / HARNESS / MANU + a beetle
-rendered in red, à la Hexstrike. Printed once at the top of `main()`
-before any orchestrator output.
+"""Startup banner — ASCII art of BUGHUNTER / HARNESS / LITE / MANU + a
+beetle rendered in red, à la Hexstrike. Printed once at the top of
+`main()` before any orchestrator output.
 
 Colors are ANSI escapes; auto-disabled when stderr is not a TTY (piped
 runs, `--help`, `NO_COLOR` env, etc.) so log files stay clean.
@@ -35,6 +35,16 @@ _HARNESS = r"""
  ██╔══██║ ██╔══██║ ██╔══██╗ ██║╚██╗██║ ██╔══╝   ╚════██║ ╚════██║
  ██║  ██║ ██║  ██║ ██║  ██║ ██║ ╚████║ ███████╗ ███████║ ███████║
  ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═══╝ ╚══════╝ ╚══════╝ ╚══════╝
+"""
+
+# ─── ASCII text: LITE (block, 6 rows) ──────────────────────────────────
+_LITE = r"""
+ ██╗      ██╗ ████████╗ ███████╗
+ ██║      ██║ ╚══██╔══╝ ██╔════╝
+ ██║      ██║    ██║    █████╗
+ ██║      ██║    ██║    ██╔══╝
+ ███████╗ ██║    ██║    ███████╗
+ ╚══════╝ ╚═╝    ╚═╝    ╚══════╝
 """
 
 # ─── MANU + beetle side by side (6 rows) ───────────────────────────────
@@ -78,7 +88,7 @@ def render_banner(color: bool | None = None) -> str:
     to auto-detection via _colors_ok()."""
     if color is None:
         color = _colors_ok()
-    parts = [_BUGHUNTER, _HARNESS, _MANU_BEETLE]
+    parts = [_BUGHUNTER, _HARNESS, _LITE, _MANU_BEETLE]
     body = "\n".join(p.rstrip() for p in parts)
     tagline_line = f"    {_TAGLINE}"
     if color:
